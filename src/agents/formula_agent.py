@@ -16,10 +16,10 @@ _FORMULA_AGENT_SYSTEM = """\
 例如：爱因斯坦著名公式只需输出 `E = m c^2`；积分可输出 `integral_0^1 x^2 dif x`。
 
 输出 JSON 格式要求：
-{
+{{
   "typst_math_code": "E = m c^2",
   "explanation": "对公式各个变量的说明"
-}
+}}
 """
 
 _FORMULA_AGENT_USER = """\

@@ -4,88 +4,104 @@ state.py — GraphState 核心状态 Schema
 """
 from typing import TypedDict, Annotated, List, Dict, Any, Optional, Union
 import operator
+import copy
 from pydantic import BaseModel, Field
 
 # ─────────────────────────── DOM Models ────────────────────────────
 
-class DocumentElement(BaseModel):
+class DocumentElement(TypedDict, total=False):
     id: str
     type: str
     content: Any
-    metadata: Dict = Field(default_factory=dict)
+    metadata: Dict
 
 class TextElement(DocumentElement):
-    type: str = "text"
-    content: str
+    pass  # type is "text"
 
 class TableElement(DocumentElement):
-    type: str = "table"
-    content: str
+    pass  # type is "table"
 
 class FormulaElement(DocumentElement):
-    type: str = "formula"
-    content: str
+    pass  # type is "formula"
 
 class ImageElement(DocumentElement):
-    type: str = "image"
-    content: str
+    pass  # type is "image"
 
-class SectionDOM(BaseModel):
+class SectionDOM(TypedDict):
     title: str
-    elements: List[Any] = Field(default_factory=list)
+    elements: List[Any]
 
 def merge_dom(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
-    """合并 DOM 树"""
+    """合并 DOM 树（深度复制以防并发污染，安全追加子元素）"""
     if not left:
-        return right or {}
+        return copy.deepcopy(right) if right else {}
     if not right:
-        return left
-    result = {**left}
-    result.update(right)
+        return copy.deepcopy(left)
+    result = copy.deepcopy(left)
+    for key, val in right.items():
+        if key not in result:
+            result[key] = copy.deepcopy(val)
+        else:
+            if isinstance(val, dict) and "element_updates" in val:
+                result[key]["elements"].extend(copy.deepcopy(val["element_updates"]))
+            elif isinstance(val, dict) and "elements" in val:
+                result[key]["elements"].extend(copy.deepcopy(val["elements"]))
     return result
 
 
 # ─────────────────────────── Reducers ────────────────────────────
 
 def add_documents(left: List[Dict[str, Any]], right: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """追加文档列表"""
+    """追加文档列表（深度复制以防并发污染）"""
     if not left:
-        return right or []
+        return copy.deepcopy(right) if right else []
     if not right:
-        return left
-    return left + right
+        return copy.deepcopy(left)
+    return copy.deepcopy(left) + copy.deepcopy(right)
 
 
 def add_feedbacks(left: List[Dict[str, Any]], right: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """替换模式：只保留最新一次的反馈"""
+    """替换模式：只保留最新一次的反馈（深度复制）"""
     if not right:
-        return left or []
-    return right
+        return copy.deepcopy(left) if left else []
+    return copy.deepcopy(right)
 
 
 def add_messages(left: List[str], right: List[str]) -> List[str]:
     """追加日志/消息列表"""
     if not left:
-        return right or []
+        return list(right) if right else []
     if not right:
-        return left
-    return left + right
+        return list(left)
+    return list(left) + list(right)
 
 
 def merge_dicts(left: Dict[str, str], right: Dict[str, str]) -> Dict[str, str]:
-    """合并字典"""
+    """合并字典（浅拷贝字符串字典）"""
     if not left:
-        return right or {}
+        return dict(right) if right else {}
     if not right:
-        return left
+        return dict(left)
     return {**left, **right}
 
 
 def replace_list(left: List[Any], right: List[Any]) -> List[Any]:
-    """替换列表（用于任务队列等需要完全覆写的字段）"""
+    """替换列表（对于 pending_tasks 我们应该改为智能合并，但为了兼容性暂行彻底覆盖）"""
+    # 如果两个节点同时想替换列表，简单的覆盖会丢数据。
+    # 这里我们改为：如果是追加新任务，就合并。但这依赖业务逻辑。
+    # 暂时保持全量覆盖，但在 orchestrator 级别解决并发覆盖问题。
     if right is None:
-        return left or []
-    return right
+        return copy.deepcopy(left) if left else []
+    return copy.deepcopy(right)
+
+
+def update_model_config(left: Dict[str, str], right: Dict[str, str]) -> Dict[str, str]:
+    """用于 model_config 的更新，防止 InvalidUpdateError"""
+    if not left:
+        return dict(right) if right else {}
+    if not right:
+        return dict(left)
+    return {**left, **right}
 
 
 # ─────────────────────────── GraphState ──────────────────────────
@@ -160,7 +176,7 @@ class GraphState(TypedDict):
     # ════════════════════ 模型配置 ════════════════════
     # { "decision": "deepseek", "searcher": "deepseek", "writer": "moonshot",
     #   "innovation": "deepseek", "reviewer": "deepseek", "embeddings": "doubao" }
-    model_config: Dict[str, str]
+    model_config: Annotated[Dict[str, str], update_model_config]
 
     # ════════════════════ 配图资产 ════════════════════
     generated_images: Dict[str, str]  # { 章节名: 图片绝对路径 }

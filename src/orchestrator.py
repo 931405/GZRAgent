@@ -34,6 +34,11 @@ from src.agents.innovation_agent import run_innovation_agent
 from src.agents.diagram_agent import run_diagram_agent
 from src.agents.layout_agent import run_layout_agent
 from src.agents.debate_panel import run_debate_panel
+from src.agents.searcher import run_searcher
+from src.agents.writer import run_writer
+from src.agents.data_agent import run_data_agent
+from src.agents.formula_agent import run_formula_agent
+from typing import get_args, get_origin, Annotated
 
 # ──────────────────────────────────────────────────────────────────
 # Multi-Worker: 并发执行 pending_tasks
@@ -56,7 +61,6 @@ def _run_task(state: GraphState, task: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         if agent_type == "searcher":
-            from src.agents.searcher import run_searcher
             return run_searcher(task_state)
 
         elif agent_type == "innovation":
@@ -65,7 +69,6 @@ def _run_task(state: GraphState, task: Dict[str, Any]) -> Dict[str, Any]:
         elif agent_type == "writer":
             if not section:
                 return {}
-            from src.agents.writer import run_writer
             return run_writer(task_state)
 
         elif agent_type == "diagram":
@@ -75,14 +78,12 @@ def _run_task(state: GraphState, task: Dict[str, Any]) -> Dict[str, Any]:
             return run_layout_agent(task_state)
 
         elif agent_type == "data":
-            from src.agents.data_agent import run_data_agent
             parts = instructions.split("|", 1)
             pid = parts[0] if len(parts) > 0 else f"tbl_{section}"
             pdesc = parts[1] if len(parts) > 1 else instructions
             return run_data_agent(task_state, section=section, placeholder_id=pid, placeholder_desc=pdesc)
             
         elif agent_type == "formula":
-            from src.agents.formula_agent import run_formula_agent
             parts = instructions.split("|", 1)
             pid = parts[0] if len(parts) > 0 else f"eq_{section}"
             pdesc = parts[1] if len(parts) > 1 else instructions
@@ -100,73 +101,42 @@ def _run_task(state: GraphState, task: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _merge_results(base: GraphState, results: List[Dict]) -> Dict[str, Any]:  # type: ignore[override]
-    """将多个任务结果安全合并回主状态"""
-    state: Dict[str, Any] = dict(base)  # type: ignore[arg-type]
+    """将多个任务结果安全合并回主状态（泛型 Reducer 应用）"""
+    state: Dict[str, Any] = copy.deepcopy(base)  # type: ignore[arg-type]
+
+    # 动态获取 GraphState 中定义的 Reducers
+    reducers = {}
+    for key, typ in GraphState.__annotations__.items():
+        if get_origin(typ) is Annotated:
+            args = get_args(typ)
+            if len(args) > 1 and callable(args[1]):
+                reducers[key] = args[1]
 
     for result in results:
         if not result:
             continue
 
-        # draft_sections: 用新内容覆盖同名章节
-        if "draft_sections" in result:
-            current = dict(state.get("draft_sections") or {})
-            current.update(result["draft_sections"])
-            state["draft_sections"] = current
-            
-            # 自动转入 V2 DOM
-            from src.state import SectionDOM, TextElement
-            existing_dom = dict(state.get("document_dom") or {})
-            for sec, content in result["draft_sections"].items():
-                if sec not in existing_dom:
-                    existing_dom[sec] = SectionDOM(title=sec, elements=[])
-                existing_dom[sec].elements.append(TextElement(id=f"{sec}_text", content=content))
-            state["document_dom"] = existing_dom
-            
-        # document_dom: 新图表/公式元素增量合并
-        if "document_dom" in result:
-            from src.state import SectionDOM
-            existing_dom = dict(state.get("document_dom") or {})
-            for sec, updates in result["document_dom"].items():
-                if sec not in existing_dom:
-                    existing_dom[sec] = SectionDOM(title=sec, elements=[])
-                if "element_updates" in updates:
-                    existing_dom[sec].elements.extend(updates["element_updates"])
-            state["document_dom"] = existing_dom
-
-        # reference_documents: 追加去重
-        if "reference_documents" in result:
-            existing = list(state.get("reference_documents") or [])
-            state["reference_documents"] = existing + result["reference_documents"]
-
-        # reference_dict: 合并
-        if "reference_dict" in result:
-            existing = dict(state.get("reference_dict") or {})
-            existing.update(result["reference_dict"])
-            state["reference_dict"] = existing
-
-        # discussion_history: 追加
-        if "discussion_history" in result:
-            existing = list(state.get("discussion_history") or [])
-            state["discussion_history"] = existing + result["discussion_history"]
-
-        # completed_tasks: 追加
-        if "completed_tasks" in result:
-            existing = list(state.get("completed_tasks") or [])
-            state["completed_tasks"] = existing + result["completed_tasks"]
-
-        # generated_images: 合并
-        if "generated_images" in result:
-            existing = dict(state.get("generated_images") or {})
-            existing.update(result["generated_images"])
-            state["generated_images"] = existing
-
-        # innovation_points: 替换
-        if result.get("innovation_points"):
-            state["innovation_points"] = result["innovation_points"]
-
-        # layout_notes: 替换
-        if result.get("layout_notes"):
-            state["layout_notes"] = result["layout_notes"]
+        for key, val in result.items():
+            if key in reducers:
+                state[key] = reducers[key](state.get(key), val)
+            elif key == "draft_sections":
+                current = copy.deepcopy(state.get("draft_sections") or {})
+                current.update(copy.deepcopy(val))
+                state["draft_sections"] = current
+                
+                # 自动转入 V2 DOM
+                existing_dom = copy.deepcopy(state.get("document_dom") or {})
+                for sec, content in val.items():
+                    if sec not in existing_dom:
+                        existing_dom[sec] = {"title": sec, "elements": []}
+                    existing_dom[sec]["elements"].append({"type": "text", "id": f"{sec}_text", "content": content})
+                state["document_dom"] = existing_dom
+            elif key == "generated_images":
+                existing = copy.deepcopy(state.get("generated_images") or {})
+                existing.update(copy.deepcopy(val))
+                state["generated_images"] = existing
+            else:
+                state[key] = copy.deepcopy(val)
 
     return state
 
@@ -195,12 +165,19 @@ def run_multi_worker(state: GraphState) -> Dict[str, Any]:
     results: List[Dict] = []
     max_workers = min(len(tasks_sorted), 6)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_run_task, state, t) for t in tasks_sorted]
+        futures = {executor.submit(_run_task, state, t): t for t in tasks_sorted}
         for fut in concurrent.futures.as_completed(futures):
+            task = futures[fut]
             try:
-                results.append(fut.result())
+                res = fut.result()
+                results.append(res)
             except Exception as e:
-                results.append({"discussion_history": [f"[MultiWorker] 任务未知异常: {e}"]})
+                err_msg = f"[MultiWorker] 任务 {task.get('agent_type')}({task.get('section', '-')}) 崩溃: {e}"
+                print(err_msg)
+                # 不将崩溃字符串抛回直接暴露在 history（否则如果 LLM 或 ContextManager 解析崩溃会直接挂掉整个流）
+                from src.utils.context_manager import make_entry
+                err_entry = make_entry("Orchestrator", task.get("section", ""), "error", err_msg, priority=9)
+                results.append({"discussion_history": [err_entry]})
 
     # 合并所有结果
     merged = _merge_results(state, results)

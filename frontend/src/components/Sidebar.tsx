@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { FolderSearch, Play, BookOpen, Upload, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
 
 export const ALL_SECTIONS = ["立项依据", "研究目标与内容", "研究方案与可行性", "特色与创新", "研究基础"];
-const PROVIDERS = ["deepseek", "moonshot", "doubao"];
+const PROVIDERS = ["deepseek", "moonshot", "doubao", "custom"];
 const MODEL_LABELS: Record<string, string> = {
     decision: '决策规划',
     searcher: '文献检索',
@@ -275,6 +275,11 @@ export function Sidebar({ onStartWorkflow, isRunning, onLoadHistory, isCollapsed
                 {/* Models */}
                 <section className="flex flex-col gap-3">
                     <h3 className="font-semibold text-blue-900 tracking-wide text-[13px] uppercase">模型分配</h3>
+                    {Object.values(models).includes("custom") && (
+                        <div className="text-[10px] text-amber-700 bg-amber-50 p-2 rounded border border-amber-200">
+                            <strong>⚠️ 提示：</strong> 选择了 custom 提供商，请确保后端 .env 已配置 CUSTOM_API_KEY。
+                        </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                         {Object.keys(models).map((key) => (
                             <div key={key}>

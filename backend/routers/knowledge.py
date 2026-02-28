@@ -3,6 +3,7 @@ knowledge.py — 知识库管理 API
 """
 import os
 import tempfile
+import asyncio
 from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 from src.utils.rag_engine import add_document_to_kb, get_kb_stats
@@ -30,7 +31,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
             tmp.write(content)
             tmp_path = tmp.name
         try:
-            chunks = add_document_to_kb(tmp_path)
+            chunks = await asyncio.to_thread(add_document_to_kb, tmp_path)
             results.append({"filename": file.filename, "status": "ok", "chunks": chunks})
         except Exception as e:
             results.append({"filename": file.filename, "status": "error", "reason": str(e)})
@@ -44,7 +45,7 @@ class ScanRequest(BaseModel):
 
 
 @router.post("/scan")
-def scan_folder(req: ScanRequest):
+async def scan_folder(req: ScanRequest):
     """同步扫描（兼容旧接口）"""
     folder = req.folder_path
     if not os.path.isdir(folder):
@@ -64,7 +65,7 @@ def scan_folder(req: ScanRequest):
     file_results = []
     for fp in all_files:
         try:
-            c = add_document_to_kb(fp)
+            c = await asyncio.to_thread(add_document_to_kb, fp)
             total_chunks += c
             if c == 0:
                 skipped += 1

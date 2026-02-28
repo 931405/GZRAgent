@@ -50,7 +50,15 @@ def run_writer(state: GraphState) -> dict:
     project_type = state.get("project_type", "基金申请")
     
     docs = state.get("reference_documents", [])
-    doc_text = "\n\n".join([f"[{d.get('title')}]\n{d.get('content')}" for d in docs])
+    
+    # 限制参考资料长度和数量，避免巨大的 Token 开销
+    safe_docs = docs[-12:] if len(docs) > 12 else docs
+    doc_parts = []
+    for d in safe_docs:
+        title = d.get('title', '未知文献')
+        content_str = str(d.get('content', ''))
+        doc_parts.append(f"[{title}]\n{content_str[:500]}...")
+    doc_text = "\n\n".join(doc_parts)
     
     # 结构化上下文管理（替代简单截断）
     all_discussions = state.get("discussion_history", [])
@@ -61,18 +69,28 @@ def run_writer(state: GraphState) -> dict:
     # 专门提取最新的 Designer 建议（兼容结构化 + 旧格式）
     designer_advice = ""
     for msg in reversed(all_discussions):
+        msg_str = str(msg)
         # 结构化格式: JSON 含 "agent": "Designer"
-        if '"Designer"' in msg and '"strategy"' in msg:
-            try:
-                import json as _json
-                entry = _json.loads(msg)
-                designer_advice = entry.get("content", "")
-            except Exception:
-                designer_advice = msg
-            break
+        import json as _json
+        try:
+            # 尝试解析可能包含 JSON 的字符串
+            if msg_str.strip().startswith("{"):
+                entry = _json.loads(msg_str)
+                if entry.get("agent") == "Designer" or "strategy" in entry:
+                    designer_advice = entry.get("content", str(entry))
+                    break
+            elif "Designer" in msg_str and "{" in msg_str:
+                 start_idx = msg_str.find("{")
+                 entry = _json.loads(msg_str[start_idx:])
+                 if entry.get("agent") == "Designer" or "strategy" in entry:
+                     designer_advice = entry.get("content", str(entry))
+                     break
+        except Exception:
+            pass
+            
         # 旧格式兼容
-        elif msg.startswith("Designer:") or "Designer:" in msg[:50]:
-            designer_advice = msg
+        if msg_str.startswith("Designer:") or "Designer:" in msg_str[:50]:
+            designer_advice = msg_str
             break
     
     # 用户长期偏好

@@ -9,6 +9,7 @@ GET  /api/export/templates       → 列出已有模板
 import os
 import shutil
 import time
+import asyncio
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -33,7 +34,7 @@ class ExportRequest(BaseModel):
 
 
 @router.post("/word")
-def export_word(req: ExportRequest):
+async def export_word(req: ExportRequest):
     """生成 Word 文档，默认自动生成配图并自动匹配模板。"""
     template_path = None
     if req.template_name:
@@ -41,7 +42,9 @@ def export_word(req: ExportRequest):
         if os.path.exists(candidate):
             template_path = candidate
 
-    path = export_to_word(
+    # 放到后台线程池执行，防止阻塞 FastAPI 主事件循环
+    path = await asyncio.to_thread(
+        export_to_word,
         project_type=req.project_type,
         topic=req.research_topic,
         drafts=req.draft_sections,
@@ -59,10 +62,11 @@ def export_word(req: ExportRequest):
 
 
 @router.post("/pdf")
-def export_pdf(req: ExportRequest):
+async def export_pdf(req: ExportRequest):
     """生成原生排版的学术 PDF 文档 (基于 Typst 引擎)。"""
     try:
-        path = export_to_typst(
+        path = await asyncio.to_thread(
+            export_to_typst,
             project_type=req.project_type,
             topic=req.research_topic,
             drafts=req.draft_sections,
@@ -79,10 +83,10 @@ def export_pdf(req: ExportRequest):
 
 
 @router.post("/word/no-image")
-def export_word_no_image(req: ExportRequest):
+async def export_word_no_image(req: ExportRequest):
     """快速导出（不生成配图）。"""
     req.generate_images = False
-    return export_word(req)
+    return await export_word(req)
 
 
 @router.post("/upload-template")
@@ -116,7 +120,7 @@ async def upload_template(file: UploadFile = File(...)):
 
 
 @router.get("/templates")
-def list_templates():
+async def list_templates():
     """列出 templates/ 目录中的可用模板。"""
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
     files = [
@@ -124,18 +128,26 @@ def list_templates():
         if f.endswith(".docx") and not f.startswith("~")
     ]
     templates = []
-    for fname in files:
-        fpath = os.path.join(TEMPLATES_DIR, fname)
+    
+    def _parse_template(fpath, fname):
         try:
             from src.utils.word_template_parser import parse_word_template
             result = parse_word_template(fpath)
             sections = [s["name"] for s in result["sections"]]
         except Exception:
             sections = []
-        templates.append({
+        return {
             "filename": fname,
             "detected_sections": sections,
             "mtime": int(os.path.getmtime(fpath)),
-        })
+        }
+    
+    # 文件较多时可能会卡顿，转入线程执行
+    for fname in files:
+        fpath = os.path.join(TEMPLATES_DIR, fname)
+        # 单文件解析本身很快，但包含LLM调用（如果缓存未命中），所以也线程化
+        tpl = await asyncio.to_thread(_parse_template, fpath, fname)
+        templates.append(tpl)
+        
     return {"templates": templates}
 

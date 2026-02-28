@@ -334,19 +334,20 @@ def _insert_dom_after(
     if img_path and os.path.exists(img_path):
         insert_ref = _xml_insert_image_para(doc, insert_ref, img_path, section_name)
         
-    for element in dom_node.elements:
-        if element.type == "text":
-             # 利用原有的 markdown 解析按块写入
-             for block in _split_content_to_blocks(element.content):
+    for element in dom_node.get("elements", []):
+        el_type = element.get("type", "text") if isinstance(element, dict) else "text"
+        el_content = element.get("content", "") if isinstance(element, dict) else str(element)
+        el_id = element.get("id", "") if isinstance(element, dict) else ""
+        if el_type == "text":
+             for block in _split_content_to_blocks(el_content):
                  insert_ref = _xml_append_text_para(doc, insert_ref, block["text"])
-        elif element.type == "table":
-             # 简单的 Markdown Table 转 Word Table（简易实现）
-             insert_ref = _xml_append_text_para(doc, insert_ref, f"【生成数据表】:\n{element.content}")
-        elif element.type == "formula":
-             insert_ref = _xml_append_text_para(doc, insert_ref, f"【数学公式】: {element.content}")
-        elif element.type == "image":
-             if os.path.exists(element.content):
-                  insert_ref = _xml_insert_image_para(doc, insert_ref, element.content, element.id)
+        elif el_type == "table":
+             insert_ref = _xml_append_text_para(doc, insert_ref, f"【生成数据表】:\n{el_content}")
+        elif el_type == "formula":
+             insert_ref = _xml_append_text_para(doc, insert_ref, f"【数学公式】: {el_content}")
+        elif el_type == "image":
+             if os.path.exists(el_content):
+                  insert_ref = _xml_insert_image_para(doc, insert_ref, el_content, el_id)
 
 
 def _write_markdown_content(doc: Document, content: str):

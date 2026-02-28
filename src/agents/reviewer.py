@@ -8,7 +8,8 @@ from langchain_core.output_parsers import JsonOutputParser
 def _run_single_reviewer(state: GraphState, persona: str, system_prompt: str) -> list:
     """运行单个 Reviewer 视角"""
     focus = state.get("current_focus", "")
-    draft = state.get("draft_sections", {}).get(focus, "")
+    draft_str = str(state.get("draft_sections", {}).get(focus, ""))
+    draft = draft_str[:4000] + ("..." if len(draft_str) > 4000 else "")
     if not draft:
         return []
     
@@ -38,21 +39,13 @@ def _run_single_reviewer(state: GraphState, persona: str, system_prompt: str) ->
         raw_text = raw.content if hasattr(raw, 'content') else str(raw)
 
         def _parse_feedbacks(text: str) -> list:
-            import re, json
-            # 尝试直接用 JsonOutputParser
-            try:
-                result = parser.parse(text)
-                if isinstance(result, list):
-                    return result
-                if isinstance(result, dict) and "feedbacks" in result:
-                    return result["feedbacks"]
-                return []
-            except Exception:
-                # fallback: 用正则抽取 JSON 数组
-                match = re.search(r'\[.*\]', text, re.DOTALL)
-                if match:
-                    return json.loads(match.group())
-                return None  # 解析彻底失败
+            from src.utils.json_parser import robust_parse_json
+            parsed = robust_parse_json(text, expect_array=True)
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict) and "feedbacks" in parsed:
+                return parsed["feedbacks"]
+            return None
 
         feedbacks = _parse_feedbacks(raw_text)
 

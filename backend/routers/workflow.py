@@ -16,8 +16,9 @@ POST /api/workflow/stop/{id}   → 停止工作流
 import asyncio
 import json
 import uuid
+import threading
 from typing import AsyncGenerator, Dict, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,15 @@ router = APIRouter()
 
 # 全局运行状态（生产环境建议 Redis）
 _runs: Dict[str, dict] = {}
+
+
+def cancel_all_runs():
+    """优雅地取消所有正在运行的工作流（应用关闭时调用）"""
+    for run_id, run_data in _runs.items():
+        if run_data.get("status") in ("pending", "running"):
+            with run_data["lock"]:
+                run_data["cancelled"] = True
+                run_data["status"] = "stopped"
 
 ALL_SECTIONS = ["立项依据", "研究目标与内容", "研究方案与可行性", "特色与创新", "研究基础"]
 
@@ -62,6 +72,7 @@ def _make_graph_state(req: WorkflowStartRequest, focus: str, draft_sections: Opt
         "research_topic": req.research_topic,
         "current_focus": focus,
         "draft_sections": dict(draft_sections or {}),
+        "document_dom": {},
         "innovation_points": "",
         "layout_notes": "",
         # 检索
@@ -109,6 +120,7 @@ def start_workflow(req: WorkflowStartRequest):
         "review_feedbacks": [],
         "messages": [],
         "cancelled": False,
+        "lock": threading.Lock(),
     }
     return {"run_id": run_id, "mode": req.mode}
 
@@ -117,15 +129,16 @@ def start_workflow(req: WorkflowStartRequest):
 def stop_workflow(run_id: str):
     run = _runs.get(run_id)
     if not run:
-        return {"error": "run_id not found"}
-    run["cancelled"] = True
-    run["status"] = "stopped"
-    return {"status": "stopped"}
+        return {"error": "run_id not found", "status": "not_found"}
+    with run.get("lock", threading.Lock()):
+        run["cancelled"] = True
+        run["status"] = "stopped"
+    return {"status": "stopped", "run_id": run_id}
 
 
 # ─────────────────────── SSE Generator ───────────────────────
 
-async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
+async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerator[str, None]:
     """异步 SSE 生成器：执行工作流并实时推送事件"""
     run = _runs.get(run_id)
     if not run:
@@ -152,18 +165,28 @@ async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
         graph_state = _make_graph_state(req, "全文", draft_sections=run["draft_sections"])
 
         try:
-            for output in app.stream(graph_state):
+            async for output in app.astream(graph_state):
+                # Check cancellation before processing each node output
                 if run.get("cancelled"):
                     yield _sse({"type": "stopped", "message": "工作流已被用户中止"})
-                    run["status"] = "stopped"
+                    with run["lock"]:
+                        run["status"] = "stopped"
+                    return
+
+                if await request.is_disconnected():
+                    print(f"[Workflow] 客户端已断开，主动中止运行: {run_id}")
+                    with run["lock"]:
+                        run["cancelled"] = True
+                        run["status"] = "stopped"
                     return
 
                 for node_name, state_update in output.items():
                     # ── 通用日志推送 ──
-                    for msg in state_update.get("discussion_history") or []:
-                        full_msg = f"[{node_name}] {msg}"
-                        run["messages"].append(full_msg)
-                        yield _sse({"type": "log", "node": node_name, "message": full_msg})
+                    with run["lock"]:
+                        for msg in state_update.get("discussion_history") or []:
+                            full_msg = f"[{node_name}] {msg}"
+                            run["messages"].append(full_msg)
+                            yield _sse({"type": "log", "node": node_name, "message": full_msg})
 
                     # ── 决策日志 ──
                     for dmsg in state_update.get("decision_log") or []:
@@ -177,17 +200,19 @@ async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
 
                     # ── 草稿更新 ──
                     if "draft_sections" in state_update:
-                        for sec, content in (state_update["draft_sections"] or {}).items():
-                            if content:
-                                run["draft_sections"][sec] = content
-                                yield _sse({"type": "draft_update", "section": sec,
-                                            "content": content})
+                        with run["lock"]:
+                            for sec, content in (state_update["draft_sections"] or {}).items():
+                                if content:
+                                    run["draft_sections"][sec] = content
+                                    yield _sse({"type": "draft_update", "section": sec,
+                                                "content": content})
 
                     # ── 评审反馈 ──
                     if "review_feedbacks" in state_update:
-                        feedbacks = state_update["review_feedbacks"] or []
-                        run["review_feedbacks"] = feedbacks
-                        yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
+                        with run["lock"]:
+                            feedbacks = state_update["review_feedbacks"] or []
+                            run["review_feedbacks"] = feedbacks
+                            yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
 
                     # ── 评分 ──
                     if "reviewer_score" in state_update:
@@ -251,24 +276,34 @@ async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
             yield _sse({"type": "section_start", "section": sec})
 
             try:
-                for output in app.stream(graph_state):
+                async for output in app.astream(graph_state):
+                    if await request.is_disconnected():
+                        print(f"[Workflow] 客户端已断开，单章节流主动中止: {run_id}")
+                        with run["lock"]:
+                            run["cancelled"] = True
+                            run["status"] = "stopped"
+                        return
+
                     for node_name, state_update in output.items():
-                        for msg in state_update.get("discussion_history") or []:
-                            full_msg = f"[{sec}/{node_name}] {msg}"
-                            run["messages"].append(full_msg)
-                            yield _sse({"type": "log", "section": sec, "node": node_name,
-                                        "message": full_msg})
+                        with run["lock"]:
+                            for msg in state_update.get("discussion_history") or []:
+                                full_msg = f"[{sec}/{node_name}] {msg}"
+                                run["messages"].append(full_msg)
+                                yield _sse({"type": "log", "section": sec, "node": node_name,
+                                            "message": full_msg})
 
                         if "draft_sections" in state_update:
-                            for s, c in (state_update["draft_sections"] or {}).items():
-                                if c:
-                                    run["draft_sections"][s] = c
-                                    yield _sse({"type": "draft_update", "section": s, "content": c})
+                            with run["lock"]:
+                                for s, c in (state_update["draft_sections"] or {}).items():
+                                    if c:
+                                        run["draft_sections"][s] = c
+                                        yield _sse({"type": "draft_update", "section": s, "content": c})
 
                         if "review_feedbacks" in state_update:
-                            feedbacks = state_update["review_feedbacks"] or []
-                            run["review_feedbacks"] = feedbacks
-                            yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
+                            with run["lock"]:
+                                feedbacks = state_update["review_feedbacks"] or []
+                                run["review_feedbacks"] = feedbacks
+                                yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
 
                         if "reviewer_score" in state_update:
                             yield _sse({"type": "reviewer_direct", "section": sec,
@@ -294,19 +329,20 @@ async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
         for _c in drafts.values():
             used_refs.update(re.findall(r"\[(Ref-\d+)\]", _c))
         if used_refs:
-            sorted_refs = sorted(list(used_refs), key=lambda x: int(x.split("-")[1]))
-            ref_mapping = {r: f"[{i+1}]" for i, r in enumerate(sorted_refs)}
-            bib_lines = [f"{ref_mapping[r]} {ref_dict.get(r, 'Unknown Reference')}" for r in sorted_refs]
-            for _s, _c in drafts.items():
-                for old_id, new_id in ref_mapping.items():
-                    _c = _c.replace(f"[{old_id}]", new_id)
-                drafts[_s] = _c
-            drafts["参考文献"] = "\n".join(bib_lines)
-            run["draft_sections"] = drafts
-            yield _sse({"type": "draft_update", "section": "参考文献",
-                        "content": drafts["参考文献"]})
-            yield _sse({"type": "log", "node": "reference_compiler",
-                        "message": f"整理了 {len(used_refs)} 条参考文献"})
+            with run["lock"]:
+                sorted_refs = sorted(list(used_refs), key=lambda x: int(x.split("-")[1]))
+                ref_mapping = {r: f"[{i+1}]" for i, r in enumerate(sorted_refs)}
+                bib_lines = [f"{ref_mapping[r]} {ref_dict.get(r, 'Unknown Reference')}" for r in sorted_refs]
+                for _s, _c in drafts.items():
+                    for old_id, new_id in ref_mapping.items():
+                        _c = _c.replace(f"[{old_id}]", new_id)
+                    drafts[_s] = _c
+                drafts["参考文献"] = "\n".join(bib_lines)
+                run["draft_sections"] = drafts
+                yield _sse({"type": "draft_update", "section": "参考文献",
+                            "content": drafts["参考文献"]})
+                yield _sse({"type": "log", "node": "reference_compiler",
+                            "message": f"整理了 {len(used_refs)} 条参考文献"})
 
     # ── 自动保存历史 ──
     try:
@@ -330,10 +366,10 @@ async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
 # ─────────────────────── Stream & Result Endpoints ───────────────────────
 
 @router.get("/stream/{run_id}")
-async def stream_workflow(run_id: str):
+async def stream_workflow(run_id: str, request: Request):
     """SSE 订阅端点"""
     return StreamingResponse(
-        _run_workflow_generator(run_id),
+        _run_workflow_generator(run_id, request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

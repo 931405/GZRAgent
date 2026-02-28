@@ -13,7 +13,18 @@ load_dotenv()
 
 from backend.routers import workflow, knowledge, history, template, export as export_router, preferences
 
-app = FastAPI(title="NSFC Agent API", version="1.0.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: setup resources if needed
+    yield
+    # Shutdown: gracefully terminate running workflows and close connections
+    from backend.routers.workflow import cancel_all_runs
+    cancel_all_runs()
+    print("[System] Application gracefully shut down, active workflows cancelled.")
+
+app = FastAPI(title="NSFC Agent API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

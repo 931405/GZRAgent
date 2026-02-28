@@ -121,32 +121,38 @@ def run_searcher(state: GraphState) -> dict:
     
     print(f"-> [Searcher]: 检索完毕 — 原始 {len(all_raw_docs)} 篇，正在 Rerank...")
     
-    # 4. LLM Rerank — 对每篇文献打 0-10 相关性分，过滤低质量
+    # 4. LLM Rerank — 批量评估文献相关性，大幅降低 Token 消耗和延迟
     ranked_docs = []
     if all_raw_docs:
+        doc_previews = []
+        for i, doc in enumerate(all_raw_docs):
+            doc_previews.append(f"[{i}] {doc.get('content', '')[:300]}")
+        doc_text = "\n\n".join(doc_previews)
+
         rerank_prompt = ChatPromptTemplate.from_messages([
-            ("system", "你是文献相关性评估专家。给定研究场景和文献摘要，输出相关性评分（0-10整数）。只输出数字，不要其他内容。"),
-            ("user", "研究主题: {topic}\n章节类型: {focus}\n检索意图: {intent}\n\n文献摘要:\n{doc}\n\n相关性评分(0-10):")
+            ("system", "你是文献相关性评估专家。评估以下列表中每个文献与研究主题的相关性（0-10分）。\n严格返回JSON字典，格式为：{\"0\": 8, \"1\": 5}。不要输出任何其他文字和Markdown标记。"),
+            ("user", "研究主题: {topic}\n章节类型: {focus}\n检索意图: {intent}\n\n文献列表:\n{docs}\n\nJSON格式结果:")
         ])
-        rerank_chain = rerank_prompt | llm | StrOutputParser()
         
-        for doc in all_raw_docs:
-            content_preview = doc.get("content", "")[:500]
-            try:
-                score_str = rerank_chain.invoke({
-                    "topic": topic,
-                    "focus": focus,
-                    "intent": search_intent,
-                    "doc": content_preview
-                }).strip()
-                score = int(score_str.strip()[:2])  # 取前2个字符防止意外输出
-            except Exception:
-                score = 5  # 解析失败给中等分
+        try:
+            raw_res = (rerank_prompt | llm | StrOutputParser()).invoke({
+                "topic": topic, "focus": focus, "intent": search_intent, "docs": doc_text
+            })
+            import json, re
+            # 尝试提取 JSON
+            match = re.search(r'\{.*?\}', raw_res, re.DOTALL)
+            scores_dict = json.loads(match.group()) if match else json.loads(raw_res)
             
-            if score >= 5:
-                ranked_docs.append({"doc": doc, "score": score})
+            for i_str, score in scores_dict.items():
+                idx = int(i_str)
+                score_val = int(score)
+                if score_val >= 5 and 0 <= idx < len(all_raw_docs):
+                    ranked_docs.append({"doc": all_raw_docs[idx], "score": score_val})
+        except Exception as e:
+            print(f"-> [Searcher]: 批量 Rerank 解析失败: {e}. 回退保留前5篇。")
+            ranked_docs = [{"doc": d, "score": 5} for d in all_raw_docs[:5]]
         
-        # 按分数降序排列，取前5篇
+        # 按分数降序排列，最多取前5篇
         ranked_docs.sort(key=lambda x: x["score"], reverse=True)
         ranked_docs = ranked_docs[:5]
     

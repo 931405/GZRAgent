@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { ALL_SECTIONS } from './Sidebar';
 import { api } from '../api/client';
 import { Download, Pencil, Save, X, Clock, RotateCcw, ChevronDown, Image, Upload, FileText, AlertTriangle, Lightbulb, CheckCircle2 } from 'lucide-react';
@@ -368,7 +370,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                         ) : isEditing ? (
                             <textarea value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full h-[450px] p-3 border-2 border-blue-200 focus:border-blue-400 focus:outline-none rounded-lg text-xs font-mono text-slate-800 resize-y" />
                         ) : (
-                            <div className="prose prose-slate max-w-none prose-sm"><ReactMarkdown>{drafts[viewFocus]}</ReactMarkdown></div>
+                            <div className="prose prose-slate max-w-none prose-sm"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{drafts[viewFocus]}</ReactMarkdown></div>
                         )}
 
                         {focusFeedbacks.length > 0 && !isEditing && (
@@ -472,7 +474,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                             </div>
                         ) : (
                             <div className="prose prose-slate max-w-none prose-sm bg-lime-50 p-5 rounded-xl border border-lime-200">
-                                <ReactMarkdown>{innovationPoints}</ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{innovationPoints}</ReactMarkdown>
                             </div>
                         )}
                     </div>
@@ -553,7 +555,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                             <div className="p-4 bg-teal-50/50 border border-teal-100 rounded-xl">
                                 <div className="text-xs font-bold text-teal-700 mb-2 flex items-center gap-1">排版优化报告</div>
                                 <div className="prose prose-sm max-w-none prose-slate text-xs">
-                                    <ReactMarkdown>{typeof layoutNotes === 'string' ? layoutNotes : JSON.stringify(layoutNotes, null, 2)}</ReactMarkdown>
+                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{typeof layoutNotes === 'string' ? layoutNotes : JSON.stringify(layoutNotes, null, 2)}</ReactMarkdown>
                                 </div>
                             </div>
                         )}
@@ -604,7 +606,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                                             return (
                                                 <div key={s} id={`toc-${s}`} className="mb-8 pb-6 border-b border-slate-200 last:border-0">
                                                     <h2 className="text-lg font-bold text-slate-800 border-l-4 border-blue-600 pl-3 mb-3 not-prose">{s}</h2>
-                                                    <ReactMarkdown>{drafts[s]}</ReactMarkdown>
+                                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{drafts[s]}</ReactMarkdown>
                                                 </div>
                                             );
                                         })}

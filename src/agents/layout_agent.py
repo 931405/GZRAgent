@@ -64,19 +64,44 @@ def run_layout_agent(state: GraphState) -> Dict[str, Any]:
     provider = config.get("layout", config.get("writer", "deepseek"))
     llm = get_llm(provider_override=provider, temperature=0.05, is_json_mode=True)
 
+    dom = state.get("document_dom") or {}
     drafts = state.get("draft_sections") or {}
-    if not drafts:
-        msg = "[LayoutAgent] 无草稿内容，跳过排版检查"
+    
+    if not dom and not drafts:
+        msg = "[LayoutAgent] 无草稿或 DOM 内容，跳过排版检查"
         print(msg)
         return {"discussion_history": [msg], "layout_notes": msg}
 
     # 构建预览文本（截断防止 token 超限）
     sections_preview_parts = []
-    for sec, content in drafts.items():
-        if content:
-            preview = content[:600]
-            wc = len(content)
-            sections_preview_parts.append(f"### {sec}（{wc}字）\n{preview}\n...")
+    
+    if dom:
+        for sec, section_dom in dom.items():
+            elements = section_dom.get("elements", [])
+            content_parts = []
+            for el in elements:
+                t = el.get("type", "text")
+                if t == "text":
+                    content_parts.append(el.get("content", ""))
+                elif t == "table":
+                    content_parts.append(f"[表格: {el.get('id')}]")
+                elif t == "formula":
+                    content_parts.append(f"[公式: {el.get('id')}]")
+                elif t == "image":
+                    content_parts.append(f"[配图: {el.get('id')}]")
+            content = "\n\n".join(content_parts)
+            if content:
+                preview = content[:600]
+                wc = len(content)
+                sections_preview_parts.append(f"### {sec}（{wc}字）\n{preview}\n...")
+    else:
+        # Fallback to drafts
+        for sec, content in drafts.items():
+            if content:
+                preview = content[:600]
+                wc = len(content)
+                sections_preview_parts.append(f"### {sec}（{wc}字）\n{preview}\n...")
+                
     sections_preview = "\n\n".join(sections_preview_parts[:8])  # 最多8章
 
     prompt = ChatPromptTemplate.from_messages([

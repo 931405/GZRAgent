@@ -166,24 +166,39 @@ def _run_single_review(state: GraphState, reviewer: Dict) -> Dict[str, Any]:
         for k in drafts.keys():
             if k in doms:
                 sec_text = ""
-                for el in doms[k].elements:
-                    if el.type == "text": sec_text += el.content + "\n"
-                    elif el.type == "table": sec_text += f"\n[数据表]\n{el.content}\n"
-                    elif el.type == "formula": sec_text += f"\n[推导公式]: {el.content}\n"
-                parts.append(f"## {k}\n{sec_text[:600]}") # 保留前600作为兼容，后续可优化
+                for el in doms[k].get("elements", []):
+                    el_type = el.get("type", "text") if isinstance(el, dict) else "text"
+                    el_content = el.get("content", "") if isinstance(el, dict) else str(el)
+                    el_meta = el.get("metadata", {}) if isinstance(el, dict) else {}
+                    if el_type == "text": 
+                        content_str = str(el_content)
+                        sec_text += content_str[:400] + ("..." if len(content_str) > 400 else "") + "\n"
+                    elif el_type == "table": 
+                        sec_text += f"\n[数据表：{el_meta.get('desc', '未命名')}]\n"
+                    elif el_type == "formula": 
+                        sec_text += f"\n[推导公式：{el_meta.get('desc', '未命名')}]\n"
+                parts.append(f"## {k}\n{sec_text}")
             else:
-                parts.append(f"## {k}\n{drafts.get(k, '')[:600]}")
-        draft = "\n\n".join(parts)[:4000]
+                draft_str = str(drafts.get(k, ''))
+                parts.append(f"## {k}\n{draft_str[:500]}" + ("..." if len(draft_str) > 500 else ""))
+        draft = "\n\n".join(parts)[:6000]
     else:
         if focus in doms:
              sec_text = ""
-             for el in doms[focus].elements:
-                  if el.type == "text": sec_text += el.content + "\n"
-                  elif el.type == "table": sec_text += f"\n[数据表]\n{el.content}\n"
-                  elif el.type == "formula": sec_text += f"\n[推导公式]: {el.content}\n"
-             draft = sec_text[:3000]
+             for el in doms[focus].get("elements", []):
+                  el_type = el.get("type", "text") if isinstance(el, dict) else "text"
+                  el_content = el.get("content", "") if isinstance(el, dict) else str(el)
+                  if el_type == "text": 
+                      content_str = str(el_content)
+                      sec_text += content_str[:800] + ("..." if len(content_str) > 800 else "") + "\n"
+                  elif el_type == "table": 
+                      sec_text += f"\n[数据表]\n"
+                  elif el_type == "formula": 
+                      sec_text += f"\n[推导公式]\n"
+             draft = sec_text[:4000]
         else:
-             draft = drafts.get(focus, "")[:3000]
+             draft_str = str(drafts.get(focus, ""))
+             draft = draft_str[:4000] + ("..." if len(draft_str) > 4000 else "")
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", reviewer["system"]),
@@ -359,12 +374,15 @@ def run_debate_panel(state: GraphState) -> Dict[str, Any]:
             })
 
     # ── Round 2: 辩论轮次（并发）──
+    import copy
     debate_results: List[Dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = {}
         for r in REVIEWERS:
-            my_review = next((x for x in round1_results if x.get("reviewer_id") == r["id"]), {})
-            fut = executor.submit(_run_debate_round, state, r, my_review, round1_results)
+            # 深拷贝前序结果，防止并发时列表和字典引用互相污染
+            safe_round1_results = copy.deepcopy(round1_results)
+            my_review = next((x for x in safe_round1_results if x.get("reviewer_id") == r["id"]), {})
+            fut = executor.submit(_run_debate_round, state, r, my_review, safe_round1_results)
             futures[fut] = r
         for fut in concurrent.futures.as_completed(futures):
             debate_results.append(fut.result())

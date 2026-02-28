@@ -177,10 +177,8 @@ def run_decision_agent(state: GraphState) -> Dict[str, Any]:
                 # Check if this placeholder is already processed in document_dom
                 processed = False
                 if sec in dom_state:
-                    for el in dom_state[sec].elements:
-                        if hasattr(el, 'metadata') and el.metadata.get('prompt') == p_desc:
-                            processed = True
-                        elif isinstance(el, dict) and el.get('metadata', {}).get('prompt') == p_desc:
+                    for el in dom_state[sec].get("elements", []):
+                        if isinstance(el, dict) and el.get('metadata', {}).get('prompt') == p_desc:
                             processed = True
                 if not processed:
                     placeholders.append(f"《{sec}》未处理任务: {p_type}专员负责解决 '{pid}|{p_desc}'")
@@ -325,42 +323,21 @@ def run_final_decision(state: GraphState) -> Dict[str, Any]:
 
 def _parse_tasks(raw_text: str) -> List[Dict]:
     """从 LLM 输出中解析任务列表"""
-    import re
-    try:
-        import json
-        # 尝试直接解析
-        result = json.loads(raw_text)
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "tasks" in result:
-            return result["tasks"]
-    except Exception:
-        pass
-
-    # 正则提取 JSON 数组
-    match = re.search(r'\[.*\]', raw_text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except Exception:
-            pass
-
+    from src.utils.json_parser import robust_parse_json
+    tasks = robust_parse_json(raw_text, expect_array=True)
+    if isinstance(tasks, list):
+        return tasks
+    elif isinstance(tasks, dict) and "tasks" in tasks:
+        return tasks["tasks"]
     return []
 
 
 def _parse_verdict(raw_text: str) -> Dict:
     """从 LLM 输出中解析裁决"""
-    import re, json
-    try:
-        return json.loads(raw_text)
-    except Exception:
-        pass
-    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except Exception:
-            pass
+    from src.utils.json_parser import robust_parse_json
+    verdict = robust_parse_json(raw_text)
+    if isinstance(verdict, dict):
+        return verdict
     return {"revision_required": False, "revision_targets": [], "decision_summary": "解析失败，默认定稿"}
 
 

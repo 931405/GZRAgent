@@ -9,6 +9,22 @@ export const apiClient = axios.create({
     },
 });
 
+apiClient.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        let msg = error.message;
+        if (error.response?.data?.detail) {
+            msg = typeof error.response.data.detail === 'string'
+                ? error.response.data.detail
+                : JSON.stringify(error.response.data.detail);
+        } else if (error.response?.data?.error) {
+            msg = error.response.data.error;
+        }
+        error.customMessage = msg;
+        return Promise.reject(error);
+    }
+);
+
 export const api = {
     // --- Workflow ---
     startWorkflow: async (data: any) => {

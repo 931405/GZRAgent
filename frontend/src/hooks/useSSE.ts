@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface SSEMessage {
     type:
-        | 'log' | 'section_start' | 'section_done'
-        | 'draft_update' | 'feedback_update' | 'done'
-        | 'error' | 'heartbeat' | 'outline_ready' | 'reviewer_direct' | 'stopped'
-        // 新架构事件类型
-        | 'task_dispatch' | 'debate_update' | 'debate_verdict'
-        | 'innovation' | 'layout_done' | 'decision_log' | 'workflow_mode';
+    | 'log' | 'section_start' | 'section_done'
+    | 'draft_update' | 'feedback_update' | 'done'
+    | 'error' | 'heartbeat' | 'outline_ready' | 'reviewer_direct' | 'stopped'
+    // 新架构事件类型
+    | 'task_dispatch' | 'debate_update' | 'debate_verdict'
+    | 'innovation' | 'layout_done' | 'decision_log' | 'workflow_mode';
     section?: string;
     node?: string;
     message?: string;
@@ -65,6 +65,24 @@ export function useSSE(runId: string | null) {
     const heartbeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectCount = useRef(0);
 
+    const messageQueueRef = useRef<string[]>([]);
+    const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const flushMessages = useCallback(() => {
+        if (messageQueueRef.current.length > 0) {
+            setMessages(prev => [...prev, ...messageQueueRef.current]);
+            messageQueueRef.current = [];
+        }
+        updateTimeoutRef.current = null;
+    }, []);
+
+    const queueMessage = useCallback((msg: string) => {
+        messageQueueRef.current.push(msg);
+        if (!updateTimeoutRef.current) {
+            updateTimeoutRef.current = setTimeout(flushMessages, 100);
+        }
+    }, [flushMessages]);
+
     const cleanup = useCallback(() => {
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
@@ -102,10 +120,10 @@ export function useSSE(runId: string | null) {
             heartbeatTimer.current = setTimeout(() => {
                 if (reconnectCount.current < MAX_RECONNECT) {
                     reconnectCount.current++;
-                    setMessages(prev => [...prev, `[系统] 连接中断，正在第 ${reconnectCount.current} 次重连...`]);
+                    queueMessage(`[系统] 连接中断，正在第 ${reconnectCount.current} 次重连...`);
                     startListening(rid, true);
                 } else {
-                    setMessages(prev => [...prev, `[系统] 重连失败，请手动刷新页面。`]);
+                    queueMessage(`[系统] 重连失败，请手动刷新页面。`);
                     setIsRunning(false);
                 }
             }, HEARTBEAT_TIMEOUT_MS);
@@ -120,11 +138,11 @@ export function useSSE(runId: string | null) {
                 if (data.type === 'heartbeat') return;
 
                 if (data.type === 'log' && data.message) {
-                    setMessages(prev => [...prev, data.message!]);
+                    queueMessage(data.message!);
                     if (data.node) setCurrentNode(data.node);
                 }
                 else if (data.type === 'decision_log' && data.message) {
-                    setMessages(prev => [...prev, `🧠 ${data.message}`]);
+                    queueMessage(`🧠 ${data.message}`);
                     setCurrentNode('decision_agent');
                 }
                 else if (data.type === 'section_start') {
@@ -134,19 +152,19 @@ export function useSSE(runId: string | null) {
                     setCurrentNode('');
                 }
                 else if (data.type === 'workflow_mode') {
-                    setMessages(prev => [...prev, `[系统] 工作流模式: ${data.mode}`]);
+                    queueMessage(`[系统] 工作流模式: ${data.mode}`);
                 }
                 else if (data.type === 'task_dispatch' && data.tasks) {
                     setPendingTasks(data.tasks);
                     setAllDispatchedTasks(prev => [...prev, ...(data.tasks as any[])]);
                     const names = (data.tasks as any[]).map(t => `${t.agent_type}(${t.section || '-'})`).join(', ');
-                    setMessages(prev => [...prev, `📋 决策Agent派发 ${data.count || data.tasks!.length} 个任务: ${names}`]);
+                    queueMessage(`📋 决策Agent派发 ${data.count || data.tasks!.length} 个任务: ${names}`);
                     setCurrentNode('multi_worker');
                 }
                 else if (data.type === 'debate_update' && data.rounds) {
                     setDebateRounds(data.rounds);
                     const latest = (data.rounds as any[]).at(-1);
-                    if (latest) setMessages(prev => [...prev, `💬 [${latest.reviewer}] ${latest.stance}: ${latest.argument?.slice(0, 60)}...`]);
+                    if (latest) queueMessage(`💬 [${latest.reviewer}] ${latest.stance}: ${latest.argument?.slice(0, 60)}...`);
                 }
                 else if (data.type === 'debate_verdict') {
                     setDebateVerdict({
@@ -155,16 +173,16 @@ export function useSSE(runId: string | null) {
                         targets: data.targets || [],
                     });
                     const verdict = data.revision_required ? '⚠️ 需要修改' : '✅ 审核通过';
-                    setMessages(prev => [...prev, `⚖️ 辩论裁决: ${verdict} | ${data.conclusion?.slice(0, 80) ?? ''}`]);
+                    queueMessage(`⚖️ 辩论裁决: ${verdict} | ${data.conclusion?.slice(0, 80) ?? ''}`);
                     setCurrentNode('final_decision');
                 }
                 else if (data.type === 'innovation' && data.content) {
                     setInnovationPoints(data.content);
-                    setMessages(prev => [...prev, `💡 创新点提炼完成（${data.content.length}字）`]);
+                    queueMessage(`💡 创新点提炼完成（${data.content.length}字）`);
                 }
                 else if (data.type === 'layout_done' && data.notes) {
                     setLayoutNotes(data.notes);
-                    setMessages(prev => [...prev, `📐 排版审查完成`]);
+                    queueMessage(`📐 排版审查完成`);
                     setCurrentNode('layout_agent');
                 }
                 else if (data.type === 'outline_ready' && data.outline) {
@@ -190,12 +208,12 @@ export function useSSE(runId: string | null) {
                     cleanup();
                 }
                 else if (data.type === 'error') {
-                    setMessages(prev => [...prev, `[错误] ${data.message}`]);
+                    queueMessage(`[错误] ${data.message}`);
                     setIsRunning(false);
                     cleanup();
                 }
                 else if (data.type === 'stopped') {
-                    setMessages(prev => [...prev, `[系统] ${data.message || '工作流已中止'}`]);
+                    queueMessage(`[系统] ${data.message || '工作流已中止'}`);
                     setIsRunning(false);
                     cleanup();
                 }
@@ -207,7 +225,7 @@ export function useSSE(runId: string | null) {
         es.onerror = () => {
             if (reconnectCount.current < MAX_RECONNECT) {
                 reconnectCount.current++;
-                setMessages(prev => [...prev, `[系统] SSE 连接异常，${RECONNECT_DELAY_MS / 1000}s 后重连...`]);
+                queueMessage(`[系统] SSE 连接异常，${RECONNECT_DELAY_MS / 1000}s 后重连...`);
                 cleanup();
                 setTimeout(() => startListening(rid, true), RECONNECT_DELAY_MS);
             } else {

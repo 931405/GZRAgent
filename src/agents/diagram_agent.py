@@ -27,8 +27,20 @@ def run_diagram_agent(state: GraphState, section: Optional[str] = None, instruct
         instructions: 额外绘图指令（可指定图类型、重点内容等）
     """
     target_section = section or state.get("current_focus", "")
-    drafts = state.get("draft_sections") or {}
-    content = drafts.get(target_section, "")
+    dom = state.get("document_dom") or {}
+    
+    if dom and target_section in dom:
+        elements = dom[target_section].get("elements", [])
+        content_parts = []
+        for el in elements:
+            if el.get("type") == "text":
+                content_parts.append(el.get("content", ""))
+            else:
+                content_parts.append(f"[{el.get('type')}: {el.get('id')}]")
+        content = "\n\n".join(content_parts)
+    else:
+        drafts = state.get("draft_sections") or {}
+        content = drafts.get(target_section, "")
 
     if not content:
         warn_msg = f"[DiagramAgent] 《{target_section}》无内容，跳过绘图"

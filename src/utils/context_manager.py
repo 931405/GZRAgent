@@ -62,7 +62,7 @@ def parse_entry(raw: str) -> Optional[Dict[str, Any]]:
 
 # ============= 结构化摘要生成 =============
 
-def build_structured_context(history: List[str], max_entries: int = 8) -> str:
+def build_structured_context(history: List[str], max_entries: int = 6) -> str:
     """将 discussion_history 转为结构化上下文注入 prompt。
     
     按 priority 排序后截取 top-N:
@@ -121,17 +121,17 @@ def build_structured_context(history: List[str], max_entries: int = 8) -> str:
 
 # ============= 压缩触发 =============
 
-def should_compress(history: List[str], threshold: int = 10) -> bool:
-    """判断是否需要压缩历史。"""
+def should_compress(history: List[str], threshold: int = 8) -> bool:
+    """判断是否需要压缩历史，阈值从 10 降低到 8 节省 Token。"""
     return len(history) > threshold
 
 
-def compress_history(history: List[str], keep_recent: int = 5) -> List[str]:
-    """压缩历史：保留高优先级 + 最近 N 条。
+def compress_history(history: List[str], keep_recent: int = 3) -> List[str]:
+    """压缩历史：保留高优先级 + 最近 N 条，引入时间衰减。
     
-    1. 最近 keep_recent 条保留原文
-    2. 更早的条目只保留 priority >= 7 的
-    3. 其余压缩为 1 条摘要
+    1. 最近 keep_recent 条保留原文（降低为 3）。
+    2. 更早的条目只保留 priority >= 8 的，且最多保留晚近的 5 条。
+    3. 其余全部统计并折叠为 1 条摘要。
     """
     if len(history) <= keep_recent:
         return history
@@ -144,17 +144,22 @@ def compress_history(history: List[str], keep_recent: int = 5) -> List[str]:
     compressed_count = 0
     for h in older:
         e = parse_entry(h)
-        if e.get("priority", 3) >= 7:
+        if e and e.get("priority", 3) >= 8:
             important.append(h)
         else:
             compressed_count += 1
+            
+    # 增加时间衰减截断
+    if len(important) > 5:
+        compressed_count += (len(important) - 5)
+        important = important[-5:]
     
     if compressed_count > 0:
         summary_entry = make_entry(
             agent="System",
             section="",
             category="decision",
-            content=f"（已压缩 {compressed_count} 条低优先级历史记录）",
+            content=f"（已折叠 {compressed_count} 条早期历史记录，保持上下文轻量）",
             priority=2
         )
         return [summary_entry] + important + recent

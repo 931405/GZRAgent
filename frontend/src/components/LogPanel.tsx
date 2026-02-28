@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 type FilterLevel = 'all' | 'key' | 'score' | 'debate';
 
@@ -30,7 +32,12 @@ const ROLE_STYLES: Record<string, { bg: string; text: string; label: string }> =
 };
 
 function stripEmojis(text: string): string {
-    return text.replace(/[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}⭐🔴🔵🔬✨⚠️✅📄📝📊🧠⚡📋💡📐👥⚖️💬]/gu, '').trim();
+    const emojisToStrip = ['⭐', '🔴', '🔵', '🔬', '✨', '⚠️', '✅', '📄', '📝', '📊', '🧠', '⚡', '📋', '💡', '📐', '👥', '⚖️', '💬'];
+    let result = text;
+    for (const e of emojisToStrip) {
+        result = result.replace(new RegExp(e, 'g'), '');
+    }
+    return result.trim();
 }
 
 function parseLogMessage(msg: string): { section: string; role: string; roleKey: string; body: string } | null {
@@ -217,7 +224,7 @@ export function LogPanel({ messages }: LogPanelProps) {
                                         <span className="shrink-0 text-[10px] font-mono text-blue-400 py-0.5 mt-px border border-blue-100 bg-blue-50/50 rounded px-1">[{parsed.section}]</span>
                                     )}
                                     <div className="text-xs text-blue-900/80 prose prose-sm prose-p:my-0.5 max-w-none prose-blue flex-1 min-w-0">
-                                        <ReactMarkdown>{parsed.body}</ReactMarkdown>
+                                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{parsed.body}</ReactMarkdown>
                                     </div>
                                 </div>
                             );
@@ -225,7 +232,7 @@ export function LogPanel({ messages }: LogPanelProps) {
 
                         return (
                             <div key={i} className="py-2.5 border-b border-blue-50/50 last:border-0 text-xs text-blue-900/80 prose prose-sm max-w-none prose-blue">
-                                <ReactMarkdown>{stripEmojis(msg)}</ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{stripEmojis(msg)}</ReactMarkdown>
                             </div>
                         );
                     })

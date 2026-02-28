@@ -78,20 +78,19 @@ def export_to_typst(
 
         if sec in dom_cache:
             dom_node = dom_cache[sec]
-            for element in dom_node.elements:
-                if element.type == "text":
-                    content_lines.append(_clean_typst_text(element.content))
-                elif element.type == "table":
-                    content_lines.append(_convert_markdown_table_to_typst(element.content))
-                elif element.type == "formula":
-                    # Typst 原生公式使用 $ ... $ 包裹
-                    formula_clean = element.content.strip()
-                    # 防止 LLM 多输出 $$，这里进行简单清洗
-                    formula_clean = formula_clean.strip("$").strip()
+            for element in dom_node.get("elements", []):
+                el_type = element.get("type", "text") if isinstance(element, dict) else "text"
+                el_content = element.get("content", "") if isinstance(element, dict) else str(element)
+                if el_type == "text":
+                    content_lines.append(_clean_typst_text(el_content))
+                elif el_type == "table":
+                    content_lines.append(_convert_markdown_table_to_typst(el_content))
+                elif el_type == "formula":
+                    formula_clean = el_content.strip().strip("$").strip()
                     content_lines.append(f"$ {formula_clean} $")
-                elif element.type == "image":
-                    if os.path.exists(element.content):
-                        safe_path = element.content.replace("\\", "/")
+                elif el_type == "image":
+                    if os.path.exists(el_content):
+                        safe_path = el_content.replace("\\", "/")
                         content_lines.append(f'#figure(image("{safe_path}", width: 80%))')
                 content_lines.append("")
         else:

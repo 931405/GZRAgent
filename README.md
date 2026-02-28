@@ -61,4 +61,4 @@ DOUBAO_API_KEY="your_api_key_here"
 
 ### 导出与终稿
 
-审核完成后，点击导出，系统将即刻生成符合最终 NSFC 格式规定、排版精美的 Word/PDF 文档，可直接用于申报。`uvicorn backend.main:app --reload --port 8000`
+审核完成后，点击导出，系统将即刻生成符合最终 NSFC 格式规定、排版精美的 Word/PDF 文档，可直接用于申报。``uvicorn backend.main:app --reload --port 8000

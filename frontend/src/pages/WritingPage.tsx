@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { LogPanel } from '../components/LogPanel';
 import { DraftViewer } from '../components/DraftViewer';
 import { WorkflowTimeline } from '../components/WorkflowTimeline';
 import { useSSE } from '../hooks/useSSE';
 import { api } from '../api/client';
-import { Activity, CheckCircle2, CircleDashed, PanelRightClose, PanelRightOpen, XCircle } from 'lucide-react';
+import { Activity, CheckCircle2, CircleDashed, PanelRightClose, PanelRightOpen, XCircle, Loader2 } from 'lucide-react';
 
 interface DraftSnapshot {
     timestamp: string;
@@ -24,19 +24,29 @@ export function WritingPage() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isRightPaneCollapsed, setIsRightPaneCollapsed] = useState(false);
 
-    // Auto-collapse sidebar when workflow starts
+    // Auto-collapse sidebar when workflow starts; reset isStopping when workflow ends
     useEffect(() => {
         if (isRunning) {
             setIsSidebarCollapsed(true);
+        } else {
+            setIsStopping(false);
         }
     }, [isRunning]);
 
     // Version history
     const [draftHistory, setDraftHistory] = useState<DraftSnapshot[]>([]);
 
-    // Toast notification
-    const [toast, setToast] = useState<string | null>(null);
-    const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+    // Toast notification queue
+    const [toasts, setToasts] = useState<{ id: number; msg: string; type?: 'error' | 'success' }[]>([]);
+    const toastIdCounter = useRef(0);
+
+    const showToast = useCallback((msg: string, type: 'error' | 'success' = 'success') => {
+        const id = ++toastIdCounter.current;
+        setToasts(prev => [...prev, { id, msg, type }]);
+        setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+        }, 3500);
+    }, []);
 
     // Connection status
     const [backendOk, setBackendOk] = useState<boolean | null>(null);
@@ -68,19 +78,27 @@ export function WritingPage() {
             const res = await api.startWorkflow(payload);
             setRunId(res.run_id);
             setBackendOk(true);
-        } catch (e) {
-            alert("启动工作流失败，请检查后端服务是否运行。");
+        } catch (e: any) {
+            showToast(`✖ 启动失败: ${e.customMessage || e.message || "请求异常"}`, 'error');
             setBackendOk(false);
         }
     };
 
+    const [isStopping, setIsStopping] = useState(false);
+
     const handleStopWorkflow = async () => {
-        if (!runId) return;
+        if (!runId || isStopping) return;
+        setIsStopping(true);
         try {
             await api.stopWorkflow(runId);
             showToast('⏹ 工作流已中止');
-        } catch {
-            alert("中止失败");
+            // Fallback: force isRunning off after 5s if SSE 'stopped' event doesn't arrive
+            setTimeout(() => {
+                setIsStopping(false);
+            }, 5000);
+        } catch (e: any) {
+            showToast(`✖ 中止失败: ${e.customMessage || e.message}`, 'error');
+            setIsStopping(false);
         }
     };
 
@@ -159,9 +177,17 @@ export function WritingPage() {
                     {isRunning && (
                         <button
                             onClick={handleStopWorkflow}
-                            className="px-4 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5"
+                            disabled={isStopping}
+                            className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${isStopping
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                                }`}
                         >
-                            <XCircle size={14} /> 停止工作流
+                            {isStopping ? (
+                                <><Loader2 size={14} className="animate-spin" /> 正在停止...</>
+                            ) : (
+                                <><XCircle size={14} /> 停止工作流</>
+                            )}
                         </button>
                     )}
                     {/* Connection indicator */}
@@ -213,12 +239,14 @@ export function WritingPage() {
                 </div>
             </main>
 
-            {/* Toast */}
-            {toast && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-blue-800 text-white px-5 py-2.5 rounded-md shadow-lg text-sm font-medium animate-bounce z-50">
-                    {toast}
-                </div>
-            )}
+            {/* Toast Queue */}
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-[9999] pointer-events-none">
+                {toasts.map(t => (
+                    <div key={t.id} className={`px-5 py-2.5 rounded-md shadow-lg text-sm font-medium animate-in fade-in slide-in-from-bottom-2 ${t.type === 'error' ? 'bg-rose-600 text-white' : 'bg-blue-800 text-white'}`}>
+                        {t.msg}
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

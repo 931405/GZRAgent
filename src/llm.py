@@ -1,5 +1,8 @@
 import os
 import time
+import random
+import httpx
+from openai import APIError, RateLimitError, APITimeoutError
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
@@ -9,7 +12,7 @@ load_dotenv()
 def get_llm(provider_override: str = None, temperature: float = 0.7, is_json_mode: bool = False) -> ChatOpenAI:
     """
     获取配置好的 LLM 实例（基于 OpenAI 兼容接口）。
-    支持的 provider: 'deepseek', 'moonshot', 'doubao'
+    支持的 provider: 'deepseek', 'moonshot', 'doubao', 'custom'
     所有 LLM 调用自动支持指数退避重试（通过 langchain_core 的内置回调）。
     """
     provider = provider_override or os.getenv("PRIMARY_PROVIDER", "deepseek").lower()
@@ -26,6 +29,10 @@ def get_llm(provider_override: str = None, temperature: float = 0.7, is_json_mod
         api_key = os.getenv("DOUBAO_API_KEY")
         base_url = os.getenv("DOUBAO_API_BASE", "https://ark.cn-beijing.volces.com/api/v3")
         model = os.getenv("DOUBAO_MODEL_ENDPOINT", "")
+    elif provider == "custom":
+        api_key = os.getenv("CUSTOM_API_KEY")
+        base_url = os.getenv("CUSTOM_API_BASE", "https://api.openai.com/v1")
+        model = os.getenv("CUSTOM_MODEL", "gpt-3.5-turbo")
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -34,7 +41,7 @@ def get_llm(provider_override: str = None, temperature: float = 0.7, is_json_mod
         "base_url": base_url,
         "model": model,
         "temperature": temperature,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         # 内置重试：最多 3 次，适应速率限制和网络抖动
         "max_retries": 3,
     }
@@ -47,25 +54,32 @@ def get_llm(provider_override: str = None, temperature: float = 0.7, is_json_mod
 
 def call_with_retry(chain, inputs: dict, max_attempts: int = 3, base_delay: float = 2.0):
     """
-    带指数退避的链调用包装器。
-    适用于不支持 max_retries 的场景，或需要更细粒度控制时。
+    带指数退避和随机抖动 (Jitter) 的链调用包装器。
     
     Args:
         chain: LangChain 链（prompt | llm | parser）
         inputs: 输入字典
         max_attempts: 最大尝试次数
-        base_delay: 初始等待秒数，每次翻倍
+        base_delay: 初始等待秒数，每次翻倍并添加抖动
     """
     last_error = None
     for attempt in range(max_attempts):
         try:
             return chain.invoke(inputs)
-        except Exception as e:
+        except (httpx.RequestError, APIError, RateLimitError, APITimeoutError) as e:
             last_error = e
             if attempt < max_attempts - 1:
+                # 指数退避 + 随机抖动避免惊群效应 (Thundering Herd)
                 delay = base_delay * (2 ** attempt)
-                print(f"[LLM Retry] 第 {attempt + 1} 次失败: {e}，{delay:.0f}s 后重试...")
-                time.sleep(delay)
+                jitter = random.uniform(0.5, 1.5)
+                wait_time = delay * jitter
+                print(f"[LLM Retry] 第 {attempt + 1} 次调用失败 ({type(e).__name__}): {e}，将在 {wait_time:.1f}s 后重试...")
+                time.sleep(wait_time)
             else:
                 print(f"[LLM Error] 已重试 {max_attempts} 次仍失败: {e}")
+                raise last_error
+        except Exception as e:
+            # 对于 JSONDecodeError 等非网络/API错误，直接抛出，避免无意义的等待
+            print(f"[LLM Fatal] 遇到非重试型错误 ({type(e).__name__}): {e}")
+            raise e
     raise last_error
