@@ -2,9 +2,10 @@ import { useState, useCallback, useEffect } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { LogPanel } from '../components/LogPanel';
 import { DraftViewer } from '../components/DraftViewer';
-import { WorkflowProgress } from '../components/WorkflowProgress';
+import { WorkflowTimeline } from '../components/WorkflowTimeline';
 import { useSSE } from '../hooks/useSSE';
 import { api } from '../api/client';
+import { Activity, CheckCircle2, CircleDashed, PanelRightClose, PanelRightOpen, XCircle } from 'lucide-react';
 
 interface DraftSnapshot {
     timestamp: string;
@@ -17,7 +18,18 @@ export function WritingPage() {
     const [projectInfo, setProjectInfo] = useState<{ type: string, topic: string } | null>(null);
 
     const { messages, drafts, setDrafts, feedbacks, isRunning, setMessages, currentNode, reviewerScore,
-            pendingTasks, allDispatchedTasks, debateRounds, debateVerdict, innovationPoints, layoutNotes } = useSSE(runId);
+        pendingTasks, allDispatchedTasks, debateRounds, debateVerdict, innovationPoints, layoutNotes } = useSSE(runId);
+
+    // UI Layout state
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isRightPaneCollapsed, setIsRightPaneCollapsed] = useState(false);
+
+    // Auto-collapse sidebar when workflow starts
+    useEffect(() => {
+        if (isRunning) {
+            setIsSidebarCollapsed(true);
+        }
+    }, [isRunning]);
 
     // Version history
     const [draftHistory, setDraftHistory] = useState<DraftSnapshot[]>([]);
@@ -92,45 +104,51 @@ export function WritingPage() {
     };
 
     return (
-        <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
+        <div className="flex h-screen bg-[#eef6ff] font-sans text-blue-900">
             <Sidebar
                 onStartWorkflow={handleStartWorkflow}
                 isRunning={isRunning}
                 onLoadHistory={handleLoadHistory}
+                isCollapsed={isSidebarCollapsed}
+                setIsCollapsed={setIsSidebarCollapsed}
             />
 
-            <main className="flex-1 flex flex-col p-4 gap-3 min-w-0 overflow-hidden" style={{ height: '100vh' }}>
+            <main className="flex-1 flex flex-col p-4 gap-4 min-w-0 overflow-hidden relative" style={{ height: '100vh' }}>
                 {/* ── 顶部工具栏 ── */}
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <div className="text-xs font-semibold text-slate-500 mr-1">
-                        {isRunning ? '🟢 运行中' : (Object.keys(drafts).length > 0 ? '⏹ 已完成' : '⚪ 待启动')}
+                <div className="flex items-center gap-3 shrink-0 flex-wrap bg-white px-4 py-2.5 rounded-md border border-blue-100">
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-blue-800 border-r border-blue-100 pr-3">
+                        {isRunning ? (
+                            <><Activity size={16} className="text-blue-500 animate-pulse" /> 运行中</>
+                        ) : (Object.keys(drafts).length > 0 ? (
+                            <><CheckCircle2 size={16} className="text-emerald-500" /> 已完成</>
+                        ) : (
+                            <><CircleDashed size={16} className="text-slate-400" /> 待启动</>
+                        ))}
                     </div>
 
                     {/* Pending tasks badge */}
                     {pendingTasks.length > 0 && isRunning && (
-                        <div className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                            ⚡ 并行 {pendingTasks.length} 任务
+                        <div className="px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
+                            <Activity size={12} className="animate-spin" /> 并行 {pendingTasks.length} 任务
                         </div>
                     )}
 
                     {/* Debate verdict badge */}
                     {debateVerdict && (
-                        <div className={`px-2 py-0.5 rounded text-xs font-semibold border ${
-                            debateVerdict.revision_required
-                                ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`} title={debateVerdict.conclusion}>
-                            {debateVerdict.revision_required ? '⚠️ 需修改' : '✅ 已通过'}
+                        <div className={`px-2.5 py-1 rounded-md text-xs font-semibold border flex items-center gap-1 ${debateVerdict.revision_required
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`} title={debateVerdict.conclusion}>
+                            {debateVerdict.revision_required ? <><Activity size={12} /> 需修改</> : <><CheckCircle2 size={12} /> 已通过</>}
                         </div>
                     )}
 
                     {/* Reviewer score badge */}
                     {reviewerScore && (
-                        <div className={`px-2 py-0.5 rounded text-xs font-bold border ${
-                            reviewerScore.score >= 85 ? 'bg-green-50 text-green-700 border-green-200'
-                                : reviewerScore.score >= 60 ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-red-50 text-red-700 border-red-200'
-                        }`}>
+                        <div className={`px-2.5 py-1 rounded-md text-xs font-bold border ${reviewerScore.score >= 85 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : reviewerScore.score >= 60 ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}>
                             评分 {reviewerScore.score.toFixed(0)} · 轮次 {reviewerScore.iteration}
                         </div>
                     )}
@@ -141,63 +159,63 @@ export function WritingPage() {
                     {isRunning && (
                         <button
                             onClick={handleStopWorkflow}
-                            className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors"
+                            className="px-4 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5"
                         >
-                            ⏹ 停止
+                            <XCircle size={14} /> 停止工作流
                         </button>
                     )}
                     {/* Connection indicator */}
-                    <div title={backendOk === true ? '后端已连接' : backendOk === false ? '后端未连接' : '检测中...'}>
-                        <div className={`w-2 h-2 rounded-full ${
-                            backendOk === true ? 'bg-green-500' : backendOk === false ? 'bg-red-500 animate-pulse' : 'bg-slate-300'
-                        }`} />
+                    <div className="flex items-center gap-1 ml-2" title={backendOk === true ? '后端已连接' : backendOk === false ? '后端未连接' : '检测中...'}>
+                        <div className={`w-2 h-2 rounded-full ${backendOk === true ? 'bg-emerald-500' : backendOk === false ? 'bg-rose-500 animate-pulse' : 'bg-slate-300'
+                            }`} />
+                        <span className="text-xs text-slate-400 font-mono">APP API</span>
                     </div>
                 </div>
 
-                {/* ── 主内容区：三列布局 ── */}
-                <div className="flex-1 grid gap-4 min-h-0" style={{ gridTemplateColumns: '220px 1fr 1.4fr' }}>
+                {/* ── 主内容区：可折叠双列布局 ── */}
+                <div className="flex-1 flex gap-4 min-h-0 relative">
 
-                    {/* 左列：流程进度面板 */}
-                    <div className="min-h-0 overflow-hidden">
-                        <WorkflowProgress
-                            currentNode={currentNode}
-                            isRunning={isRunning}
-                            allDispatchedTasks={allDispatchedTasks}
-                            debateRounds={debateRounds}
-                            debateVerdict={debateVerdict}
-                            reviewerScore={reviewerScore}
-                            drafts={drafts}
-                            layoutNotes={layoutNotes}
-                            innovationPoints={innovationPoints}
-                        />
+                    {/* 左侧工作流监控区 */}
+                    <div className={`flex flex-col gap-4 min-w-0 transition-all duration-300 ease-in-out ${isRightPaneCollapsed ? 'w-full' : 'w-[40%]'}`}>
+                        <WorkflowTimeline currentNode={currentNode} isRunning={isRunning} />
+
+                        <div className="flex-1 min-h-0">
+                            <LogPanel messages={messages} />
+                        </div>
                     </div>
 
-                    {/* 中列：日志 */}
-                    <div className="min-h-0 overflow-hidden">
-                        <LogPanel messages={messages} />
-                    </div>
+                    {/* 右侧边栏展开/折叠按钮 */}
+                    <button
+                        onClick={() => setIsRightPaneCollapsed(!isRightPaneCollapsed)}
+                        className={`absolute top-1/2 -mt-4 bg-white border border-blue-200 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-md p-1 z-10 shadow-sm transition-all duration-300 ${isRightPaneCollapsed ? 'right-0' : 'right-[60%] mr-2'}`}
+                        title={isRightPaneCollapsed ? "展开文档预览" : "折叠文档预览"}
+                    >
+                        {isRightPaneCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
+                    </button>
 
-                    {/* 右列：草稿查看器 */}
-                    <div className="min-h-0 overflow-hidden">
-                        <DraftViewer
-                            drafts={drafts}
-                            feedbacks={feedbacks}
-                            projectInfo={projectInfo}
-                            onSaveDraft={handleSaveDraft}
-                            draftHistory={draftHistory}
-                            onRestoreSnapshot={handleRestoreSnapshot}
-                            innovationPoints={innovationPoints}
-                            layoutNotes={layoutNotes}
-                            debateRounds={debateRounds}
-                            debateVerdict={debateVerdict}
-                        />
+                    {/* 右侧文档预览区 */}
+                    <div className={`min-h-0 overflow-hidden transition-all duration-300 ease-in-out ${isRightPaneCollapsed ? 'w-0 opacity-0' : 'w-[60%] opacity-100'}`}>
+                        <div className="h-full w-full">
+                            <DraftViewer
+                                drafts={drafts}
+                                feedbacks={feedbacks}
+                                projectInfo={projectInfo}
+                                onSaveDraft={handleSaveDraft}
+                                draftHistory={draftHistory}
+                                onRestoreSnapshot={handleRestoreSnapshot}
+                                innovationPoints={innovationPoints}
+                                layoutNotes={layoutNotes}
+                                debateRounds={debateRounds}
+                                debateVerdict={debateVerdict}
+                            />
+                        </div>
                     </div>
                 </div>
             </main>
 
             {/* Toast */}
             {toast && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium animate-bounce z-50">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-blue-800 text-white px-5 py-2.5 rounded-md shadow-lg text-sm font-medium animate-bounce z-50">
                     {toast}
                 </div>
             )}

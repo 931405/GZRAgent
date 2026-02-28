@@ -97,6 +97,22 @@ export const api = {
         return res.blob();
     },
 
+    exportPdf: async (data: {
+        project_type: string;
+        research_topic: string;
+        draft_sections: Record<string, string>;
+        generate_images?: boolean;
+    }) => {
+        // Returns a Blob for file download
+        const res = await fetch(`${API_BASE}/export/pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error(`Export PDF failed: ${res.status}`);
+        return res.blob();
+    },
+
     listExportTemplates: async () => {
         const res = await apiClient.get('/export/templates');
         return res.data.templates as Array<{ filename: string; detected_sections: string[]; mtime: number }>;

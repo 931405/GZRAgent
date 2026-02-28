@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ALL_SECTIONS } from './Sidebar';
 import { api } from '../api/client';
-import { Download, Pencil, Save, X, Clock, RotateCcw, ChevronDown, Image, Upload, FileText } from 'lucide-react';
+import { Download, Pencil, Save, X, Clock, RotateCcw, ChevronDown, Image, Upload, FileText, AlertTriangle, Lightbulb, CheckCircle2 } from 'lucide-react';
 
 interface DraftSnapshot {
     timestamp: string;
@@ -56,18 +56,18 @@ function PersonaBadge({ persona }: { persona?: string }) {
     if (!persona) return null;
     const p = persona.toLowerCase();
     if (p.includes('红') || p.includes('挑战') || p.includes('challenge')) {
-        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">🔴 红脸·挑刺</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-rose-50 text-rose-700 border border-rose-200">挑战方·挑刺</span>;
     }
     if (p.includes('蓝') || p.includes('建设') || p.includes('support')) {
-        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">🔵 蓝脸·建设</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-teal-50 text-teal-700 border border-teal-200">建设方·支持</span>;
     }
     if (p.includes('方法') || p.includes('method')) {
-        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">🔬 方法论</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-slate-100 text-slate-700 border border-slate-200">方法论</span>;
     }
     if (p.includes('创新') || p.includes('innov')) {
-        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-lime-100 text-lime-700 border border-lime-200">✨ 创新性</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-cyan-50 text-cyan-700 border border-cyan-200">创新性</span>;
     }
-    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{persona}</span>;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm bg-blue-50 text-blue-700 border border-blue-200">{persona}</span>;
 }
 
 export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draftHistory, onRestoreSnapshot, innovationPoints, layoutNotes, debateRounds, debateVerdict }: DraftViewerProps) {
@@ -86,6 +86,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
     const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
     const [availableTemplates, setAvailableTemplates] = useState<Array<{ filename: string; detected_sections: string[] }>>([]);
     const [isExporting, setIsExporting] = useState(false);
+    const [isExportingPdf, setIsExportingPdf] = useState(false);
     const [uploadingTemplate, setUploadingTemplate] = useState(false);
     const exportPanelRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -135,6 +136,32 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
         }
     };
 
+    const handleExportPdf = async () => {
+        if (!projectInfo) return;
+        setIsExportingPdf(true);
+        setShowExportPanel(false);
+        try {
+            const blob = await api.exportPdf({
+                project_type: projectInfo.type,
+                research_topic: projectInfo.topic,
+                draft_sections: drafts,
+                generate_images: generateImages,
+            });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectInfo.type}_申请书.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('PDF 导出失败，请检查后端日志。您可能需要先撰写完成包含表格或公式的章节。');
+        } finally {
+            setIsExportingPdf(false);
+        }
+    };
+
     const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -171,16 +198,16 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
 
     const tabs = [
         { key: 'feedback' as const, label: '修订建议', badge: feedbackCount > 0 ? feedbackCount : undefined },
-        { key: 'innovation' as const, label: '💡 创新点', badge: innovationPoints ? undefined : undefined },
-        { key: 'debate' as const, label: '⚖️ 辩论报告', badge: debateVerdict ? (debateVerdict.revision_required ? '需改' : undefined) : undefined },
+        { key: 'innovation' as const, label: '创新点分析', badge: innovationPoints ? undefined : undefined },
+        { key: 'debate' as const, label: '辩论报告', badge: debateVerdict ? (debateVerdict.revision_required ? '需改' : undefined) : undefined },
         { key: 'preview' as const, label: '完整预览' },
         { key: 'history' as const, label: '版本历史', badge: draftHistory.length > 0 ? draftHistory.length : undefined },
     ];
 
     return (
-        <div className="flex flex-col h-full bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden" style={{ minHeight: 0 }}>
+        <div className="flex flex-col h-full bg-white rounded-md border border-blue-100 overflow-hidden" style={{ minHeight: 0 }}>
             {/* Header Tabs */}
-            <div className="bg-slate-50 px-4 pt-3 border-b border-slate-200 flex justify-between items-end shrink-0">
+            <div className="bg-[#f0f7ff] px-4 pt-3 border-b border-blue-100 flex justify-between items-end shrink-0">
                 <div className="flex gap-0.5">
                     {tabs.map(t => (
                         <button
@@ -190,7 +217,9 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                         >
                             {t.label}
                             {t.badge !== undefined && (
-                                <span className="ml-1 inline-flex items-center justify-center w-4 h-4 text-[9px] font-bold rounded-full bg-rose-500 text-white">{t.badge > 99 ? '99+' : t.badge}</span>
+                                <span className={typeof t.badge === 'string' ? "ml-1 inline-flex items-center justify-center px-1 h-4 text-[9px] font-bold rounded-full bg-rose-500 text-white" : "ml-1 inline-flex items-center justify-center w-4 h-4 text-[9px] font-bold rounded-full bg-rose-500 text-white"}>
+                                    {typeof t.badge === 'number' && t.badge > 99 ? '99+' : t.badge}
+                                </span>
                             )}
                         </button>
                     ))}
@@ -214,7 +243,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                         </button>
                         <button
                             onClick={() => setShowExportPanel(v => !v)}
-                            disabled={Object.keys(drafts).length === 0 || isExporting}
+                            disabled={Object.keys(drafts).length === 0 || isExporting || isExportingPdf}
                             className="text-xs flex items-center text-slate-500 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed border px-1.5 py-1 rounded-r bg-white hover:bg-slate-50 transition-colors"
                             title="导出选项"
                         >
@@ -277,12 +306,32 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                                 )}
                             </div>
 
-                            <button
-                                onClick={handleExport}
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center gap-2"
-                            >
-                                <Download size={13} /> 确认导出
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleExport}
+                                    disabled={isExporting || isExportingPdf}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-2 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {isExporting ? (
+                                        <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                    ) : (
+                                        <Download size={13} />
+                                    )}
+                                    {isExporting ? '导出中...' : '导出 Word'}
+                                </button>
+                                <button
+                                    onClick={handleExportPdf}
+                                    disabled={isExporting || isExportingPdf}
+                                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white py-2 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {isExportingPdf ? (
+                                        <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                    ) : (
+                                        <Download size={13} />
+                                    )}
+                                    {isExportingPdf ? '导出中...' : '导出 PDF (原生排版)'}
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -371,34 +420,34 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                                                 {/* Macro-level problem description */}
                                                 {fb.problem_description && (
                                                     <div className="flex gap-2 items-start">
-                                                        <span className="shrink-0 w-5 h-5 rounded bg-red-100 text-red-600 flex items-center justify-center text-[11px] mt-0.5">⚠</span>
+                                                        <span className="shrink-0 w-5 h-5 rounded bg-rose-50 text-rose-600 flex items-center justify-center mt-0.5"><AlertTriangle size={12} /></span>
                                                         <div className="flex-1">
-                                                            <div className="text-[10px] font-semibold text-red-700 mb-0.5">问题描述</div>
-                                                            <div className="text-slate-800 bg-red-50 px-2.5 py-1.5 rounded border border-red-100">{fb.problem_description}</div>
+                                                            <div className="text-[10px] font-semibold text-rose-700 mb-0.5">问题描述</div>
+                                                            <div className="text-slate-800 bg-rose-50/50 px-2.5 py-1.5 rounded border border-rose-100">{fb.problem_description}</div>
                                                         </div>
                                                     </div>
                                                 )}
                                                 {/* Macro-level improvement direction */}
                                                 {fb.improvement_direction && (
                                                     <div className="flex gap-2 items-start">
-                                                        <span className="shrink-0 w-5 h-5 rounded bg-green-100 text-green-600 flex items-center justify-center text-[11px] mt-0.5">💡</span>
+                                                        <span className="shrink-0 w-5 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center mt-0.5"><Lightbulb size={12} /></span>
                                                         <div className="flex-1">
-                                                            <div className="text-[10px] font-semibold text-green-700 mb-0.5">改进方向</div>
-                                                            <div className="text-slate-800 bg-green-50 px-2.5 py-1.5 rounded border border-green-100">{fb.improvement_direction}</div>
+                                                            <div className="text-[10px] font-semibold text-emerald-700 mb-0.5">改进方向</div>
+                                                            <div className="text-slate-800 bg-emerald-50/50 px-2.5 py-1.5 rounded border border-emerald-100">{fb.improvement_direction}</div>
                                                         </div>
                                                     </div>
                                                 )}
                                                 {/* Fallback for old format with original/suggested text */}
                                                 {fb.original_text && (
                                                     <div className="flex gap-2 items-start">
-                                                        <span className="shrink-0 w-4 h-4 rounded bg-red-100 text-red-600 flex items-center justify-center text-[10px] font-bold mt-0.5">-</span>
-                                                        <div className="flex-1 text-red-800 bg-red-50 px-2.5 py-1.5 rounded border border-red-100 line-through">{fb.original_text}</div>
+                                                        <span className="shrink-0 w-4 h-4 rounded bg-rose-50 text-rose-600 flex items-center justify-center text-[10px] font-bold mt-0.5">-</span>
+                                                        <div className="flex-1 text-rose-800 bg-rose-50/50 px-2.5 py-1.5 rounded border border-rose-100 line-through">{fb.original_text}</div>
                                                     </div>
                                                 )}
                                                 {fb.suggested_text && (
                                                     <div className="flex gap-2 items-start">
-                                                        <span className="shrink-0 w-4 h-4 rounded bg-green-100 text-green-600 flex items-center justify-center text-[10px] font-bold mt-0.5">+</span>
-                                                        <div className="flex-1 text-green-800 bg-green-50 px-2.5 py-1.5 rounded border border-green-100">{fb.suggested_text}</div>
+                                                        <span className="shrink-0 w-4 h-4 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center text-[10px] font-bold mt-0.5">+</span>
+                                                        <div className="flex-1 text-emerald-800 bg-emerald-50/50 px-2.5 py-1.5 rounded border border-emerald-100">{fb.suggested_text}</div>
                                                     </div>
                                                 )}
                                                 <div className="text-slate-600 pt-1"><strong className="text-slate-700">理由：</strong>{fb.reason}</div>
@@ -415,7 +464,7 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                 {activeTab === 'innovation' && (
                     <div>
                         <div className="mb-4 flex items-center gap-2">
-                            <span className="text-xs font-semibold text-lime-800 bg-lime-100 px-2.5 py-1 rounded-full border border-lime-200">💡 InnovationAgent 生成</span>
+                            <span className="text-xs font-semibold text-cyan-800 bg-cyan-50 px-2.5 py-1 rounded-sm border border-cyan-200 flex items-center gap-1.5"><Lightbulb size={12} /> InnovationAgent 生成</span>
                         </div>
                         {!innovationPoints ? (
                             <div className="text-slate-400 text-center py-16 text-sm">
@@ -434,9 +483,11 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
                     <div className="space-y-5">
                         {/* 最终裁决卡片 */}
                         {debateVerdict ? (
-                            <div className={`p-4 rounded-xl border-2 ${debateVerdict.revision_required ? 'bg-rose-50 border-rose-300' : 'bg-emerald-50 border-emerald-300'}`}>
+                            <div className={`p-4 rounded-xl border-2 ${debateVerdict.revision_required ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
                                 <div className="flex items-center gap-2 mb-2">
-                                    <span className="text-lg">{debateVerdict.revision_required ? '⚠️' : '✅'}</span>
+                                    <span className={`flex items-center justify-center w-6 h-6 rounded-full ${debateVerdict.revision_required ? 'text-rose-600 bg-rose-100' : 'text-emerald-600 bg-emerald-100'}`}>
+                                        {debateVerdict.revision_required ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                                    </span>
                                     <span className={`font-bold text-sm ${debateVerdict.revision_required ? 'text-rose-700' : 'text-emerald-700'}`}>
                                         辩论裁决: {debateVerdict.revision_required ? '需要修订' : '质量达标'}
                                     </span>
@@ -499,8 +550,8 @@ export function DraftViewer({ drafts, feedbacks, projectInfo, onSaveDraft, draft
 
                         {/* 排版注释 */}
                         {layoutNotes && (
-                            <div className="p-4 bg-teal-50 border border-teal-200 rounded-xl">
-                                <div className="text-xs font-bold text-teal-700 mb-2 flex items-center gap-1">📐 排版优化报告</div>
+                            <div className="p-4 bg-teal-50/50 border border-teal-100 rounded-xl">
+                                <div className="text-xs font-bold text-teal-700 mb-2 flex items-center gap-1">排版优化报告</div>
                                 <div className="prose prose-sm max-w-none prose-slate text-xs">
                                     <ReactMarkdown>{typeof layoutNotes === 'string' ? layoutNotes : JSON.stringify(layoutNotes, null, 2)}</ReactMarkdown>
                                 </div>

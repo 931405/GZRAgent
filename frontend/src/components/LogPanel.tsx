@@ -7,78 +7,79 @@ interface LogPanelProps {
     messages: string[];
 }
 
-// Agent role color mapping
+// Agent role color mapping - Blue/Teal/Cyan spectrum
 const ROLE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-    // ---- 原有角色 ----
-    searcher: { bg: 'bg-amber-100', text: 'text-amber-800', label: '文献专员' },
-    designer: { bg: 'bg-violet-100', text: 'text-violet-800', label: '策略师' },
-    writer: { bg: 'bg-sky-100', text: 'text-sky-800', label: '首席研究员' },
-    reviewer: { bg: 'bg-rose-100', text: 'text-rose-800', label: '评审专家' },
-    reviewer_red: { bg: 'bg-red-100', text: 'text-red-800', label: '🔴 红脸·挑刺' },
-    reviewer_blue: { bg: 'bg-blue-100', text: 'text-blue-800', label: '🔵 蓝脸·建设' },
-    coherence_checker: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: '连贯性审计' },
-    reference_compiler: { bg: 'bg-teal-100', text: 'text-teal-800', label: '参考文献' },
-    // ---- 新架构角色 ----
-    decision_agent: { bg: 'bg-indigo-100', text: 'text-indigo-800', label: '🧠 决策规划' },
-    multi_worker: { bg: 'bg-cyan-100', text: 'text-cyan-800', label: '⚡ 并行执行' },
-    review_panel: { bg: 'bg-rose-50', text: 'text-rose-700', label: '👥 专家评审' },
-    final_decision: { bg: 'bg-purple-100', text: 'text-purple-800', label: '⚖️ 辩论裁决' },
-    layout_agent: { bg: 'bg-teal-100', text: 'text-teal-800', label: '📐 排版优化' },
-    innovation_agent: { bg: 'bg-lime-100', text: 'text-lime-800', label: '💡 创新专员' },
-    // ---- 辩论专家 ----
-    expert_red: { bg: 'bg-red-100', text: 'text-red-800', label: '🔴 挑战专家' },
-    expert_blue: { bg: 'bg-blue-100', text: 'text-blue-800', label: '🔵 建设专家' },
-    expert_method: { bg: 'bg-orange-100', text: 'text-orange-800', label: '🔬 方法论专家' },
-    expert_innovation: { bg: 'bg-lime-100', text: 'text-lime-800', label: '✨ 创新性专家' },
+    searcher: { bg: 'bg-sky-100', text: 'text-sky-800', label: '文献专员' },
+    designer: { bg: 'bg-blue-100', text: 'text-blue-800', label: '策略师' },
+    writer: { bg: 'bg-indigo-100', text: 'text-indigo-800', label: '首席研究员' },
+    reviewer: { bg: 'bg-cyan-100', text: 'text-cyan-800', label: '评审专家' },
+    reviewer_red: { bg: 'bg-rose-50', text: 'text-rose-700', label: '挑战方·挑刺' },
+    reviewer_blue: { bg: 'bg-teal-50', text: 'text-teal-700', label: '建设方·支持' },
+    coherence_checker: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: '连贯性审计' },
+    reference_compiler: { bg: 'bg-slate-100', text: 'text-slate-700', label: '参考文献' },
+    decision_agent: { bg: 'bg-blue-600', text: 'text-white', label: '决策规划' },
+    multi_worker: { bg: 'bg-sky-500', text: 'text-white', label: '并行执行' },
+    review_panel: { bg: 'bg-indigo-500', text: 'text-white', label: '专家评审' },
+    final_decision: { bg: 'bg-slate-700', text: 'text-white', label: '辩论裁决' },
+    layout_agent: { bg: 'bg-teal-600', text: 'text-white', label: '排版优化' },
+    innovation_agent: { bg: 'bg-cyan-600', text: 'text-white', label: '创新专员' },
+    expert_red: { bg: 'bg-rose-100', text: 'text-rose-800', label: '挑战专家' },
+    expert_blue: { bg: 'bg-blue-100', text: 'text-blue-800', label: '建设专家' },
+    expert_method: { bg: 'bg-slate-200', text: 'text-slate-800', label: '方法论专家' },
+    expert_innovation: { bg: 'bg-cyan-100', text: 'text-cyan-800', label: '创新性专家' },
 };
+
+function stripEmojis(text: string): string {
+    return text.replace(/[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}⭐🔴🔵🔬✨⚠️✅📄📝📊🧠⚡📋💡📐👥⚖️💬]/gu, '').trim();
+}
 
 function parseLogMessage(msg: string): { section: string; role: string; roleKey: string; body: string } | null {
     // ---- 新架构：emoji 前缀格式 ----
     // 🧠 [DecisionAgent] ...  or  🧠 决策Agent: ...
     if (msg.startsWith('🧠')) {
         const m = msg.match(/^🧠\s*(?:\[DecisionAgent\]|决策Agent[:：]?)\s*([\s\S]*)$/i);
-        return { section: '', role: 'DecisionAgent', roleKey: 'decision_agent', body: (m?.[1] ?? msg).trim() };
+        return { section: '', role: 'DecisionAgent', roleKey: 'decision_agent', body: stripEmojis(m?.[1] ?? msg) };
     }
     // ⚡ [MultiWorker] ... or  ⚡ 并行派发...
     if (msg.startsWith('⚡')) {
         const m = msg.match(/^⚡\s*(?:\[[^\]]+\])?\s*([\s\S]*)$/);
-        return { section: '', role: 'MultiWorker', roleKey: 'multi_worker', body: (m?.[1] ?? msg).trim() };
+        return { section: '', role: 'MultiWorker', roleKey: 'multi_worker', body: stripEmojis(m?.[1] ?? msg) };
     }
     // 📋 决策Agent派发 N 个任务...
     if (msg.startsWith('📋')) {
-        return { section: '', role: 'DecisionAgent', roleKey: 'decision_agent', body: msg.replace(/^📋\s*/, '').trim() };
+        return { section: '', role: 'DecisionAgent', roleKey: 'decision_agent', body: stripEmojis(msg.replace(/^📋\s*/, '')) };
     }
     // 💡 [InnovationAgent] ...
     if (msg.startsWith('💡')) {
         const m = msg.match(/^💡\s*(?:\[[^\]]+\])?\s*([\s\S]*)$/);
-        return { section: '', role: 'InnovationAgent', roleKey: 'innovation_agent', body: (m?.[1] ?? msg).trim() };
+        return { section: '', role: 'InnovationAgent', roleKey: 'innovation_agent', body: stripEmojis(m?.[1] ?? msg) };
     }
     // 📐 [LayoutAgent] ...
     if (msg.startsWith('📐')) {
         const m = msg.match(/^📐\s*(?:\[[^\]]+\])?\s*([\s\S]*)$/);
-        return { section: '', role: 'LayoutAgent', roleKey: 'layout_agent', body: (m?.[1] ?? msg).trim() };
+        return { section: '', role: 'LayoutAgent', roleKey: 'layout_agent', body: stripEmojis(m?.[1] ?? msg) };
     }
     // 👥 [ReviewPanel] ...
     if (msg.startsWith('👥')) {
         const m = msg.match(/^👥\s*(?:\[[^\]]+\])?\s*([\s\S]*)$/);
-        return { section: '', role: 'ReviewPanel', roleKey: 'review_panel', body: (m?.[1] ?? msg).trim() };
+        return { section: '', role: 'ReviewPanel', roleKey: 'review_panel', body: stripEmojis(m?.[1] ?? msg) };
     }
     // ⚖️ 辩论裁决...
     if (msg.startsWith('⚖️')) {
-        return { section: '', role: 'FinalDecision', roleKey: 'final_decision', body: msg.replace(/^⚖️\s*/, '').trim() };
+        return { section: '', role: 'FinalDecision', roleKey: 'final_decision', body: stripEmojis(msg.replace(/^⚖️\s*/, '')) };
     }
     // 💬 [专家名][stance]: ...  辩论专家发言
     const debateMatch = msg.match(/^💬\s*\[([^\]]+)\](?:\[([^\]]*)\])?\s*[:：]\s*([\s\S]*)$/);
     if (debateMatch) {
         const expertName = debateMatch[1];
         const stance = debateMatch[2] || '';
-        const body = debateMatch[3].trim();
+        const body = stripEmojis(debateMatch[3]);
         let roleKey = 'review_panel';
         if (expertName.includes('红') || stance.toLowerCase().includes('challenge')) roleKey = 'expert_red';
         else if (expertName.includes('蓝') || stance.toLowerCase().includes('support')) roleKey = 'expert_blue';
         else if (expertName.includes('方法') || expertName.toLowerCase().includes('method')) roleKey = 'expert_method';
         else if (expertName.includes('创新') || expertName.toLowerCase().includes('innov')) roleKey = 'expert_innovation';
-        return { section: '', role: expertName, roleKey, body };
+        return { section: '', role: stripEmojis(expertName), roleKey, body };
     }
 
     // ---- 原有格式：[章节 / agent_name] 内容... ----
@@ -115,7 +116,7 @@ function parseLogMessage(msg: string): { section: string; role: string; roleKey:
             body = body.replace(/^Reviewer[:：]\s*/, '');
         }
 
-        return { section, role: roleRaw, roleKey, body };
+        return { section, role: stripEmojis(roleRaw), roleKey, body: stripEmojis(body) };
     }
 
     // Try parsing standalone JSON entry (no [section/node] wrapper)
@@ -126,7 +127,7 @@ function parseLogMessage(msg: string): { section: string; role: string; roleKey:
             const roleKey = agent.includes('reviewer-红') ? 'reviewer_red'
                 : agent.includes('reviewer-蓝') ? 'reviewer_blue'
                     : Object.keys(ROLE_STYLES).find(k => agent.includes(k)) || '';
-            return { section: jsonObj.section || '', role: jsonObj.agent, roleKey, body: jsonObj.content };
+            return { section: jsonObj.section || '', role: stripEmojis(jsonObj.agent), roleKey, body: stripEmojis(jsonObj.content) };
         }
     } catch { /* not JSON */ }
 
@@ -134,7 +135,7 @@ function parseLogMessage(msg: string): { section: string; role: string; roleKey:
     const match2 = msg.match(/^(Searcher|Designer|Writer|Reviewer|Coherence):\s*([\s\S]*)$/i);
     if (match2) {
         const roleKey = match2[1].toLowerCase().includes('coherence') ? 'coherence_checker' : match2[1].toLowerCase();
-        return { section: '', role: match2[1], roleKey, body: match2[2].trim() };
+        return { section: '', role: match2[1], roleKey, body: stripEmojis(match2[2]) };
     }
 
     return null;
@@ -173,23 +174,23 @@ export function LogPanel({ messages }: LogPanelProps) {
     ];
 
     return (
-        <div className="flex flex-col h-full bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 shrink-0 flex items-center justify-between">
-                <h2 className="font-semibold text-slate-700">工作流监控 (Agent 会议记录)</h2>
-                <div className="flex gap-1">
+        <div className="flex flex-col h-full bg-white rounded-md border border-blue-100 overflow-hidden">
+            <div className="bg-[#f0f7ff] px-4 py-2.5 border-b border-blue-100 shrink-0 flex items-center justify-between">
+                <h2 className="text-xs font-semibold text-blue-900 tracking-wide uppercase">工作流监控 (会议日志)</h2>
+                <div className="flex gap-1.5 items-center">
                     {filterBtns.map(({ level, label }) => (
                         <button
                             key={level}
                             onClick={() => setFilter(level)}
-                            className={`px-2 py-0.5 text-xs rounded font-medium transition-colors ${filter === level
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                            className={`px-2 py-0.5 text-[10px] rounded-md font-medium transition-colors border ${filter === level
+                                ? 'bg-blue-600 border-blue-600 text-white'
+                                : 'bg-white border-blue-200 text-blue-600 hover:bg-blue-50'
                                 }`}
                         >
                             {label}
                         </button>
                     ))}
-                    <span className="ml-2 text-xs text-slate-400 self-center">{filteredMessages.length}/{messages.length}</span>
+                    <span className="ml-2 text-[10px] text-blue-400 font-mono">{filteredMessages.length}/{messages.length}</span>
                 </div>
             </div>
             <div
@@ -208,14 +209,14 @@ export function LogPanel({ messages }: LogPanelProps) {
                         if (parsed) {
                             const style = ROLE_STYLES[parsed.roleKey] || { bg: 'bg-slate-100', text: 'text-slate-700', label: parsed.role };
                             return (
-                                <div key={i} className="flex items-start gap-2 py-2 border-b border-slate-100 last:border-0">
-                                    <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${style.bg} ${style.text}`}>
+                                <div key={i} className="flex items-start gap-2 py-2.5 border-b border-blue-50/50 last:border-0">
+                                    <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${style.bg} ${style.text}`}>
                                         {style.label}
                                     </span>
                                     {parsed.section && (
-                                        <span className="shrink-0 text-xs text-slate-400 py-0.5">[{parsed.section}]</span>
+                                        <span className="shrink-0 text-[10px] font-mono text-blue-400 py-0.5 mt-px border border-blue-100 bg-blue-50/50 rounded px-1">[{parsed.section}]</span>
                                     )}
-                                    <div className="text-sm text-slate-700 prose prose-sm max-w-none prose-slate flex-1 min-w-0">
+                                    <div className="text-xs text-blue-900/80 prose prose-sm prose-p:my-0.5 max-w-none prose-blue flex-1 min-w-0">
                                         <ReactMarkdown>{parsed.body}</ReactMarkdown>
                                     </div>
                                 </div>
@@ -223,8 +224,8 @@ export function LogPanel({ messages }: LogPanelProps) {
                         }
 
                         return (
-                            <div key={i} className="py-2 border-b border-slate-100 last:border-0 text-sm text-slate-700 prose prose-sm max-w-none prose-slate">
-                                <ReactMarkdown>{msg}</ReactMarkdown>
+                            <div key={i} className="py-2.5 border-b border-blue-50/50 last:border-0 text-xs text-blue-900/80 prose prose-sm max-w-none prose-blue">
+                                <ReactMarkdown>{stripEmojis(msg)}</ReactMarkdown>
                             </div>
                         );
                     })
