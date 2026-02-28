@@ -14,6 +14,9 @@ import os
 import hashlib
 import json
 import threading
+from dotenv import load_dotenv
+
+load_dotenv()
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
@@ -23,6 +26,93 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 PERSIST_DIRECTORY = os.path.join(os.path.dirname(__file__), "..", "..", "data", "knowledge_base")
 FAISS_INDEX_PATH = os.path.join(PERSIST_DIRECTORY, "faiss_index")
 FINGERPRINT_FILE = os.path.join(PERSIST_DIRECTORY, "processed_docs.json")
+
+# ============= OCR Fallback（扫描 PDF） =============
+
+def _ocr_pdf_fallback(file_path: str) -> list:
+    """对扫描件 PDF 进行多线程 OCR 提取文字（PyMuPDF 渲染 + RapidOCR 并行识别）。
+    
+    适用于无可选择文字的纯图片 PDF。
+    页面渲染在主线程完成（PyMuPDF 非线程安全），OCR 识别并发执行。
+    返回 langchain Document 列表。
+    """
+    try:
+        import fitz  # PyMuPDF
+        from rapidocr_onnxruntime import RapidOCR
+        from langchain_core.documents import Document
+        import numpy as np
+        from PIL import Image
+        import io
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+    except ImportError as e:
+        print(f"[RAG-OCR] OCR 依赖缺失: {e}，跳过 OCR。")
+        return []
+
+    documents = []
+    
+    # 共享一个 OCR 引擎（避免每线程重复加载模型）
+    _shared_ocr = RapidOCR()
+    _ocr_lock = threading.Lock()
+    
+    def _ocr_single_page(page_img_bytes, page_num, total, src_path):
+        """单页 OCR 工作函数"""
+        img = Image.open(io.BytesIO(page_img_bytes))
+        img_array = np.array(img)
+        with _ocr_lock:
+            result, _ = _shared_ocr(img_array)
+        page_text = "\n".join([line[1] for line in result]) if result else ""
+        chars = len(page_text.strip())
+        if chars > 0:
+            print(f"  [OCR] 第 {page_num + 1}/{total} 页: {chars} 字符")
+            return Document(
+                page_content=page_text,
+                metadata={"source": src_path, "page": page_num, "method": "ocr"}
+            )
+        return None
+
+    try:
+        pdf = fitz.open(file_path)
+        total_pages = len(pdf)
+        
+        # 自适应 DPI：大文件降低分辨率以节省内存和时间
+        dpi = 150 if total_pages > 20 else 300
+        print(f"[RAG-OCR] 扫描件 PDF 检测到 {total_pages} 页，DPI={dpi}，分批 OCR 启动...")
+        
+        # 分批渲染+OCR（每批最多 8 页，避免一次性渲染 128 页撑爆内存）
+        BATCH_SIZE = 8
+        max_workers = min(BATCH_SIZE, 4)
+
+        for batch_start in range(0, total_pages, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_pages)
+            print(f"  [OCR 批次] 渲染第 {batch_start+1}-{batch_end}/{total_pages} 页...")
+            
+            # 主线程渲染本批次页面
+            page_images = []
+            for i in range(batch_start, batch_end):
+                pix = pdf[i].get_pixmap(dpi=dpi)
+                page_images.append((pix.tobytes("png"), i))
+            
+            # 多线程 OCR 本批次
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(_ocr_single_page, img, idx, total_pages, file_path): idx
+                    for img, idx in page_images
+                }
+                for fut in as_completed(futures):
+                    doc = fut.result()
+                    if doc:
+                        documents.append(doc)
+        
+        pdf.close()
+        
+        # 按页码排序
+        documents.sort(key=lambda d: d.metadata.get("page", 0))
+        print(f"[RAG-OCR] OCR 完成，共提取 {len(documents)} 页有效文字")
+        
+    except Exception as e:
+        print(f"[RAG-OCR] OCR 处理失败: {e}")
+    
+    return documents
 
 # ============= Embedding 配置 =============
 
@@ -50,10 +140,9 @@ _faiss_store = None
 _faiss_lock = threading.Lock()
 
 def init_vectorstore():
-    """初始化或加载本地 FAISS 向量数据库（自动持久化到磁盘）。
+    """初始化或加载本地 FAISS 向量数据库。
     
-    FAISS 不依赖 SQLite，没有文件锁和 HNSW 损坏问题。
-    带有全局缓存和读写锁保证线程安全。
+    如果磁盘上存在已保存的索引则加载，否则返回 None（延迟到第一次添加文档时创建）。
     """
     global _faiss_store
     with _faiss_lock:
@@ -78,16 +167,10 @@ def init_vectorstore():
                 print(f"[RAG] FAISS 索引加载成功: {index_path}")
                 return store
             except Exception as e:
-                print(f"[RAG] FAISS 索引加载失败 ({e})，将重建空索引。")
+                print(f"[RAG] FAISS 索引加载失败 ({e})，将在添加文档时重建。")
 
-        # 创建空的 FAISS 向量库（需要至少一个文档才能初始化）
-        # 使用一个占位文档初始化
-        from langchain_core.documents import Document
-        placeholder = Document(page_content="placeholder", metadata={"source": "__init__"})
-        store = FAISS.from_documents([placeholder], embeddings)
-        _faiss_store = store
-        print(f"[RAG] 已创建新 FAISS 索引")
-        return store
+        # 不创建空索引，返回 None，延迟到第一次 add 时创建
+        return None
 
 
 def _save_faiss_index():
@@ -97,7 +180,9 @@ def _save_faiss_index():
         return
     index_path = os.path.abspath(FAISS_INDEX_PATH)
     try:
+        os.makedirs(index_path, exist_ok=True)
         _faiss_store.save_local(index_path)
+        print(f"[RAG] FAISS 索引已保存: {index_path}")
     except Exception as e:
         print(f"[RAG] FAISS 索引保存失败: {e}")
 
@@ -133,6 +218,8 @@ def _file_fingerprint(file_path: str) -> str:
 
 def add_document_to_kb(file_path: str, provider: str = None) -> int:
     """解析并增量添加文档到本地知识库（跳过已处理的相同文件）"""
+    global _faiss_store
+    
     fingerprint = _file_fingerprint(file_path)
     fps = _load_fingerprints()
     
@@ -154,41 +241,56 @@ def add_document_to_kb(file_path: str, provider: str = None) -> int:
     
     raw_docs = loader.load()
     
+    # OCR Fallback: 若 PDF 提取到 0 文字（扫描件），自动使用 OCR
+    total_text = sum(len(d.page_content.strip()) for d in raw_docs)
+    if ext == ".pdf" and total_text == 0:
+        print(f"[RAG] '{filename}' 为扫描件 PDF（0 文字），启动 OCR...")
+        raw_docs = _ocr_pdf_fallback(file_path)
+        if not raw_docs:
+            print(f"-> [RAG]: '{filename}' OCR 后仍无内容，跳过。")
+            return 0
+    
     # 分块（语义与层级感知分割器）
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=150,
         separators=[
-            "\n\n",
-            "\n#",
-            "```",
-            "$$",
-            "\n",
-            "。", "！", "？", "；",
-            ". ",
-            " ", ""
+            "\n\n", "\n#", "```", "$$", "\n",
+            "。", "！", "？", "；", ". ", " ", ""
         ],
         keep_separator=True
     )
     documents = splitter.split_documents(raw_docs)
     
-    # 写入 FAISS 向量数据库
-    vectorstore = init_vectorstore()
+    if not documents:
+        print(f"-> [RAG]: 文件 '{filename}' 解析后无内容，跳过。")
+        return 0
+    
+    # 写入 FAISS 向量数据库（延迟创建）
     with _faiss_lock:
-        vectorstore.add_documents(documents)
+        embeddings = get_embeddings()
+        if _faiss_store is None:
+            # 第一次添加文档 — 用真实文档初始化 FAISS
+            _faiss_store = FAISS.from_documents(documents, embeddings)
+            print(f"[RAG] 从 '{filename}' 创建新 FAISS 索引 ({len(documents)} 片段)")
+        else:
+            _faiss_store.add_documents(documents)
         _save_faiss_index()
     
     # 记录指纹
     fps[filename] = fingerprint
     _save_fingerprints(fps)
     
-    print(f"-> [RAG]: 成功将 '{filename}' 的 {len(documents)} 个片段嵌入到 FAISS（Qwen3-Embedding-8B）。")
+    print(f"-> [RAG]: 成功将 '{filename}' 的 {len(documents)} 个片段嵌入到 FAISS。")
     return len(documents)
 
 def search_local_kb(query: str, k: int = 3, provider: str = None) -> list:
     """从本地知识库中针对 query 进行语义检索"""
     try:
         vectorstore = init_vectorstore()
+        if vectorstore is None:
+            print("[RAG] 知识库为空，请先添加文档。")
+            return []
         results = vectorstore.similarity_search(query, k=k)
         return [
             {
@@ -196,7 +298,6 @@ def search_local_kb(query: str, k: int = 3, provider: str = None) -> list:
                 "content": doc.page_content
             }
             for doc in results
-            if doc.metadata.get("source") != "__init__"  # 排除占位文档
         ]
     except Exception as e:
         print(f"[RAG Error]: {e}")
