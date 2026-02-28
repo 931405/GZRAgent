@@ -1,0 +1,356 @@
+"""
+workflow.py — 撰写工作流 API (新版)
+
+POST /api/workflow/start       → 启动工作流，返回 run_id
+GET  /api/workflow/stream/{id} → SSE 实时推送工作流进度
+GET  /api/workflow/result/{id} → 获取最终结果
+POST /api/workflow/stop/{id}   → 停止工作流
+
+新增 SSE 事件类型：
+  task_dispatch   - 决策 Agent 派发的任务列表
+  debate_update   - 评审专家辩论轮次更新
+  debate_verdict  - 辩论最终裁决
+  innovation      - 创新点内容就绪
+  layout_done     - 排版审查完成
+"""
+import asyncio
+import json
+import uuid
+from typing import AsyncGenerator, Dict, Optional
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+router = APIRouter()
+
+# 全局运行状态（生产环境建议 Redis）
+_runs: Dict[str, dict] = {}
+
+ALL_SECTIONS = ["立项依据", "研究目标与内容", "研究方案与可行性", "特色与创新", "研究基础"]
+
+
+# ─────────────────────── Request Schema ───────────────────────
+
+class WorkflowStartRequest(BaseModel):
+    project_type: str = "面上项目"
+    research_topic: str
+    current_focus: str = "全文"         # 新架构默认写全文
+    max_iterations: int = 2
+    mode: str = "all"                   # "all"=新多Agent全文模式 | "single"=兼容旧版单章节模式
+    template_hint: str = ""
+    draft_sections: Dict[str, str] = Field(default_factory=dict)
+    model_config_: Dict[str, str] = Field(default_factory=lambda: {
+        "decision": "deepseek",
+        "searcher": "deepseek",
+        "writer": "deepseek",
+        "innovation": "deepseek",
+        "reviewer": "deepseek",
+        "layout": "deepseek",
+        "embeddings": "doubao",
+    }, alias="model_config")
+
+    class Config:
+        populate_by_name = True
+
+
+# ─────────────────────── State Builder ───────────────────────
+
+def _make_graph_state(req: WorkflowStartRequest, focus: str, draft_sections: Optional[dict] = None) -> dict:
+    return {
+        # 基础
+        "project_type": req.project_type,
+        "research_topic": req.research_topic,
+        "current_focus": focus,
+        "draft_sections": dict(draft_sections or {}),
+        "innovation_points": "",
+        "layout_notes": "",
+        # 检索
+        "reference_documents": [],
+        "reference_dict": {},
+        # 评审
+        "review_feedbacks": [],
+        "prev_review_feedbacks": [],
+        "discussion_history": [],
+        # 系统控制
+        "iteration_count": 0,
+        "max_iterations": req.max_iterations,
+        "status": "INITIALIZED",
+        "reviewer_score": 0.0,
+        # 决策系统
+        "pending_tasks": [],
+        "completed_tasks": [],
+        "decision_log": [],
+        "current_phase": "planning",
+        # 辩论
+        "debate_rounds": [],
+        "debate_conclusion": "",
+        "revision_required": False,
+        "revision_targets": [],
+        # 知识传递
+        "completed_section_summaries": {},
+        "document_outline": "",
+        # 结果
+        "final_document_path": None,
+        "model_config": req.model_config_,
+        "generated_images": {},
+    }
+
+
+# ─────────────────────── REST Endpoints ───────────────────────
+
+@router.post("/start")
+def start_workflow(req: WorkflowStartRequest):
+    """启动工作流，立即返回 run_id"""
+    run_id = str(uuid.uuid4())
+    _runs[run_id] = {
+        "status": "pending",
+        "request": req,
+        "draft_sections": dict(req.draft_sections),
+        "review_feedbacks": [],
+        "messages": [],
+        "cancelled": False,
+    }
+    return {"run_id": run_id, "mode": req.mode}
+
+
+@router.post("/stop/{run_id}")
+def stop_workflow(run_id: str):
+    run = _runs.get(run_id)
+    if not run:
+        return {"error": "run_id not found"}
+    run["cancelled"] = True
+    run["status"] = "stopped"
+    return {"status": "stopped"}
+
+
+# ─────────────────────── SSE Generator ───────────────────────
+
+async def _run_workflow_generator(run_id: str) -> AsyncGenerator[str, None]:
+    """异步 SSE 生成器：执行工作流并实时推送事件"""
+    run = _runs.get(run_id)
+    if not run:
+        yield f"data: {json.dumps({'type': 'error', 'message': 'run_id not found'})}\n\n"
+        return
+
+    run["status"] = "running"
+    req: WorkflowStartRequest = run["request"]
+
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    import time
+    last_heartbeat = time.time()
+    HEARTBEAT_INTERVAL = 10
+
+    # ── 新版全文多 Agent 模式 ──
+    if req.mode in ("all", "full"):
+        yield _sse({"type": "log", "node": "system", "message": "启动多Agent动态调度工作流..."})
+        yield _sse({"type": "workflow_mode", "mode": "multi_agent"})
+
+        from src.orchestrator import build_orchestrator
+        app = build_orchestrator()
+        graph_state = _make_graph_state(req, "全文", draft_sections=run["draft_sections"])
+
+        try:
+            for output in app.stream(graph_state):
+                if run.get("cancelled"):
+                    yield _sse({"type": "stopped", "message": "工作流已被用户中止"})
+                    run["status"] = "stopped"
+                    return
+
+                for node_name, state_update in output.items():
+                    # ── 通用日志推送 ──
+                    for msg in state_update.get("discussion_history") or []:
+                        full_msg = f"[{node_name}] {msg}"
+                        run["messages"].append(full_msg)
+                        yield _sse({"type": "log", "node": node_name, "message": full_msg})
+
+                    # ── 决策日志 ──
+                    for dmsg in state_update.get("decision_log") or []:
+                        yield _sse({"type": "decision_log", "node": node_name, "message": dmsg})
+
+                    # ── 任务派发 ──
+                    pending = state_update.get("pending_tasks")
+                    if pending:
+                        yield _sse({"type": "task_dispatch", "tasks": pending,
+                                    "count": len(pending)})
+
+                    # ── 草稿更新 ──
+                    if "draft_sections" in state_update:
+                        for sec, content in (state_update["draft_sections"] or {}).items():
+                            if content:
+                                run["draft_sections"][sec] = content
+                                yield _sse({"type": "draft_update", "section": sec,
+                                            "content": content})
+
+                    # ── 评审反馈 ──
+                    if "review_feedbacks" in state_update:
+                        feedbacks = state_update["review_feedbacks"] or []
+                        run["review_feedbacks"] = feedbacks
+                        yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
+
+                    # ── 评分 ──
+                    if "reviewer_score" in state_update:
+                        score = state_update["reviewer_score"]
+                        yield _sse({"type": "reviewer_direct", "score": score,
+                                    "iteration": state_update.get("iteration_count", 0)})
+
+                    # ── 辩论轮次 ──
+                    new_rounds = state_update.get("debate_rounds")
+                    if new_rounds:
+                        yield _sse({"type": "debate_update", "rounds": new_rounds})
+
+                    # ── 辩论裁决 ──
+                    conclusion = state_update.get("debate_conclusion")
+                    if conclusion:
+                        revision = state_update.get("revision_required", False)
+                        targets = state_update.get("revision_targets", [])
+                        yield _sse({"type": "debate_verdict", "conclusion": conclusion,
+                                    "revision_required": revision, "targets": targets})
+
+                    # ── 创新点就绪 ──
+                    if state_update.get("innovation_points"):
+                        yield _sse({"type": "innovation", "content": state_update["innovation_points"]})
+
+                    # ── 排版审查结果 ──
+                    if state_update.get("layout_notes"):
+                        yield _sse({"type": "layout_done", "notes": state_update["layout_notes"]})
+
+                await asyncio.sleep(0)
+
+                # Heartbeat
+                now = time.time()
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    yield _sse({"type": "heartbeat"})
+                    last_heartbeat = now
+
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
+
+    # ── 旧版兼容模式（单章节） ──
+    else:
+        yield _sse({"type": "log", "node": "system", "message": "启动单章节模式（兼容旧版）..."})
+        yield _sse({"type": "workflow_mode", "mode": "single"})
+
+        from src.orchestrator import build_orchestrator
+        app = build_orchestrator()
+
+        sections = [req.current_focus]
+        graph_state = _make_graph_state(
+            req, req.current_focus, draft_sections=run["draft_sections"]
+        )
+
+        for sec in sections:
+            if run.get("cancelled"):
+                yield _sse({"type": "stopped", "message": f"已在 '{sec}' 前中止"})
+                run["status"] = "stopped"
+                return
+
+            graph_state["current_focus"] = sec
+            graph_state["iteration_count"] = 0
+            yield _sse({"type": "section_start", "section": sec})
+
+            try:
+                for output in app.stream(graph_state):
+                    for node_name, state_update in output.items():
+                        for msg in state_update.get("discussion_history") or []:
+                            full_msg = f"[{sec}/{node_name}] {msg}"
+                            run["messages"].append(full_msg)
+                            yield _sse({"type": "log", "section": sec, "node": node_name,
+                                        "message": full_msg})
+
+                        if "draft_sections" in state_update:
+                            for s, c in (state_update["draft_sections"] or {}).items():
+                                if c:
+                                    run["draft_sections"][s] = c
+                                    yield _sse({"type": "draft_update", "section": s, "content": c})
+
+                        if "review_feedbacks" in state_update:
+                            feedbacks = state_update["review_feedbacks"] or []
+                            run["review_feedbacks"] = feedbacks
+                            yield _sse({"type": "feedback_update", "feedbacks": feedbacks})
+
+                        if "reviewer_score" in state_update:
+                            yield _sse({"type": "reviewer_direct", "section": sec,
+                                        "score": state_update["reviewer_score"]})
+
+                    await asyncio.sleep(0)
+                    now = time.time()
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield _sse({"type": "heartbeat"})
+                        last_heartbeat = now
+
+            except Exception as e:
+                yield _sse({"type": "error", "message": str(e)})
+
+            yield _sse({"type": "section_done", "section": sec})
+
+    # ── 收尾：参考文献整理 ──
+    import re
+    drafts = run.get("draft_sections") or {}
+    if drafts:
+        ref_dict = run.get("ref_dict") or {}
+        used_refs = set()
+        for _c in drafts.values():
+            used_refs.update(re.findall(r"\[(Ref-\d+)\]", _c))
+        if used_refs:
+            sorted_refs = sorted(list(used_refs), key=lambda x: int(x.split("-")[1]))
+            ref_mapping = {r: f"[{i+1}]" for i, r in enumerate(sorted_refs)}
+            bib_lines = [f"{ref_mapping[r]} {ref_dict.get(r, 'Unknown Reference')}" for r in sorted_refs]
+            for _s, _c in drafts.items():
+                for old_id, new_id in ref_mapping.items():
+                    _c = _c.replace(f"[{old_id}]", new_id)
+                drafts[_s] = _c
+            drafts["参考文献"] = "\n".join(bib_lines)
+            run["draft_sections"] = drafts
+            yield _sse({"type": "draft_update", "section": "参考文献",
+                        "content": drafts["参考文献"]})
+            yield _sse({"type": "log", "node": "reference_compiler",
+                        "message": f"整理了 {len(used_refs)} 条参考文献"})
+
+    # ── 自动保存历史 ──
+    try:
+        from src.utils.history_manager import save_history
+        save_state = {
+            "project_type": req.project_type,
+            "research_topic": req.research_topic,
+            "draft_sections": run["draft_sections"],
+            "discussion_history": run["messages"],
+        }
+        p_name = req.research_topic[:10]
+        save_history(save_state, f"{req.project_type}_{p_name}")
+        yield _sse({"type": "log", "node": "system", "message": "历史记录已自动保存"})
+    except Exception as e:
+        print(f"[Auto-save Error]: {e}")
+
+    run["status"] = "done"
+    yield _sse({"type": "done", "draft_sections": run["draft_sections"]})
+
+
+# ─────────────────────── Stream & Result Endpoints ───────────────────────
+
+@router.get("/stream/{run_id}")
+async def stream_workflow(run_id: str):
+    """SSE 订阅端点"""
+    return StreamingResponse(
+        _run_workflow_generator(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/result/{run_id}")
+def get_result(run_id: str):
+    """获取最终结果"""
+    run = _runs.get(run_id)
+    if not run:
+        return {"error": "not found"}
+    return {
+        "status": run["status"],
+        "draft_sections": run.get("draft_sections", {}),
+        "review_feedbacks": run.get("review_feedbacks", []),
+        "messages": run.get("messages", []),
+    }
