@@ -293,24 +293,166 @@ def add_document_to_kb(file_path: str, provider: str = None) -> int:
     print(f"-> [RAG]: 成功将 '{filename}' 的 {len(documents)} 个片段嵌入到 FAISS。")
     return len(documents)
 
-def search_local_kb(query: str, k: int = 3, provider: str = None) -> list:
-    """从本地知识库中针对 query 进行语义检索"""
+def search_local_kb(query: str, k: int = 3, provider: str = None, 
+                    hybrid: bool = True, bm25_weight: float = 0.3) -> list:
+    """从本地知识库中针对 query 进行混合检索（向量 + BM25）。
+    
+    借鉴 OpenClaw 的混合搜索策略：
+    - 向量搜索：擅长语义匹配（"这意味着同一件事"）
+    - BM25：擅长精确的高信号 token（ID、代码符号、科学术语、化学名称）
+    - 两者加权合并，同时覆盖自然语言查询和"大海捞针"场景
+    
+    Args:
+        query: 检索查询
+        k: 返回结果数
+        provider: embedding provider (unused, kept for API compat)
+        hybrid: 是否启用 BM25 混合检索
+        bm25_weight: BM25 结果权重 (0-1), 向量权重为 1 - bm25_weight
+    """
     try:
         vectorstore = init_vectorstore()
         if vectorstore is None:
             print("[RAG] 知识库为空，请先添加文档。")
             return []
-        results = vectorstore.similarity_search(query, k=k)
+        
+        # 1. 向量语义检索
+        vector_results = vectorstore.similarity_search_with_score(query, k=k * 2)
+        
+        # 2. BM25 精确匹配（如果启用且有足够文档）
+        bm25_results = []
+        if hybrid:
+            try:
+                bm25_results = _bm25_search(vectorstore, query, k=k * 2)
+            except Exception as e:
+                print(f"[RAG] BM25 检索失败，回退纯向量: {e}")
+        
+        # 3. 混合融合
+        if bm25_results and hybrid:
+            merged = _merge_hybrid_results(
+                vector_results=[(doc, score) for doc, score in vector_results],
+                bm25_results=bm25_results,
+                k=k,
+                bm25_weight=bm25_weight
+            )
+        else:
+            merged = [doc for doc, _ in vector_results[:k]]
+        
         return [
             {
                 "title": f"Local KB: {doc.metadata.get('source', 'unknown')}",
                 "content": doc.page_content
             }
-            for doc in results
+            for doc in merged
         ]
     except Exception as e:
         print(f"[RAG Error]: {e}")
         return []
+
+
+def _bm25_search(vectorstore, query: str, k: int = 6) -> list:
+    """基于 BM25 的精确 token 匹配检索。
+    
+    从 FAISS 向量库中提取所有文档文本，构建简易 BM25 索引进行检索。
+    适用于科学术语、化学名称等需要精确匹配的场景。
+    """
+    import math
+    import re
+    
+    # 从 FAISS docstore 中提取所有文档
+    all_docs = list(vectorstore.docstore._dict.values())
+    if not all_docs:
+        return []
+    
+    # 中文分词（简易：按标点和空格切分）
+    def tokenize(text: str) -> list:
+        # 简单分词：英文按空格，中文按字符 + 常见标点分割
+        tokens = re.findall(r'[a-zA-Z0-9_-]+|[\u4e00-\u9fff]', text.lower())
+        return tokens
+    
+    # 构建 BM25 索引
+    corpus = [tokenize(doc.page_content) for doc in all_docs]
+    query_tokens = tokenize(query)
+    
+    if not query_tokens:
+        return []
+    
+    # BM25 参数
+    k1 = 1.5
+    b = 0.75
+    avg_dl = sum(len(doc) for doc in corpus) / max(len(corpus), 1)
+    N = len(corpus)
+    
+    # 计算 IDF
+    df = {}
+    for doc_tokens in corpus:
+        seen = set(doc_tokens)
+        for token in seen:
+            df[token] = df.get(token, 0) + 1
+    
+    # 对每个文档计算 BM25 分数
+    scores = []
+    for i, doc_tokens in enumerate(corpus):
+        score = 0.0
+        dl = len(doc_tokens)
+        tf_map = {}
+        for t in doc_tokens:
+            tf_map[t] = tf_map.get(t, 0) + 1
+        
+        for qt in query_tokens:
+            if qt not in df:
+                continue
+            idf = math.log((N - df[qt] + 0.5) / (df[qt] + 0.5) + 1)
+            tf = tf_map.get(qt, 0)
+            score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avg_dl))
+        
+        if score > 0:
+            scores.append((all_docs[i], score))
+    
+    # 按分数排序
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:k]
+
+
+def _merge_hybrid_results(vector_results, bm25_results, k: int = 3, 
+                          bm25_weight: float = 0.3) -> list:
+    """融合向量检索和 BM25 检索结果（加权去重）。
+    
+    使用归一化后的分数加权合并，去重基于文档内容前100字符。
+    """
+    # 归一化分数
+    def normalize(results):
+        if not results:
+            return []
+        scores = [s for _, s in results]
+        min_s = min(scores)
+        max_s = max(scores)
+        r = max_s - min_s if max_s != min_s else 1
+        return [(doc, (s - min_s) / r) for doc, s in results]
+    
+    vec_norm = normalize(vector_results)
+    bm25_norm = normalize(bm25_results)
+    
+    # 合并打分
+    seen = {}  # content_key -> (doc, combined_score)
+    
+    vec_weight = 1 - bm25_weight
+    for doc, score in vec_norm:
+        key = doc.page_content[:100]
+        if key in seen:
+            seen[key] = (doc, seen[key][1] + score * vec_weight)
+        else:
+            seen[key] = (doc, score * vec_weight)
+    
+    for doc, score in bm25_norm:
+        key = doc.page_content[:100]
+        if key in seen:
+            seen[key] = (doc, seen[key][1] + score * bm25_weight)
+        else:
+            seen[key] = (doc, score * bm25_weight)
+    
+    # 按综合分数排序
+    merged = sorted(seen.values(), key=lambda x: x[1], reverse=True)
+    return [doc for doc, _ in merged[:k]]
 
 def get_kb_stats() -> dict:
     """获取知识库统计信息（供前端展示）"""

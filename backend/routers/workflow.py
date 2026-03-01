@@ -137,7 +137,72 @@ async def stop_workflow(run_id: str):
     task: asyncio.Task = run.get("_async_task")
     if task and not task.done():
         task.cancel()
+    # 清理 Gateway 队列
+    from backend.gateway import cleanup_queue
+    cleanup_queue(run_id)
     return {"status": "stopped", "run_id": run_id}
+
+
+# ─────────────────────── Gateway 消息注入端点 ───────────────────────
+
+class SteerRequest(BaseModel):
+    """Steer 打断请求"""
+    content: str
+    priority: int = 9
+
+class CollectRequest(BaseModel):
+    """Collect 收集请求"""
+    content: str
+    target_section: str = ""
+
+
+@router.post("/steer/{run_id}")
+def steer_workflow(run_id: str, req: SteerRequest):
+    """注入 Steer 消息：打断当前流程，在下一个安全检查点注入优先指令。
+    
+    典型用途：
+    - "跳过文献检索，直接开始写作"
+    - "不要修改立项依据，保持原样"
+    """
+    run = _runs.get(run_id)
+    if not run or run.get("status") not in ("pending", "running"):
+        return {"error": "run_id not found or not running", "status": "error"}
+    
+    from backend.gateway import push_steer
+    push_steer(run_id, req.content, priority=req.priority)
+    return {"status": "queued", "strategy": "steer", "run_id": run_id}
+
+
+@router.post("/collect/{run_id}")
+def collect_feedback(run_id: str, req: CollectRequest):
+    """注入 Collect 消息：收集修改意见到缓冲区，等待合并后统一提交。
+    
+    典型用途：连续多条修改建议（如"把第三段数据更新"+"在方案中增加实验"）
+    """
+    run = _runs.get(run_id)
+    if not run or run.get("status") not in ("pending", "running"):
+        return {"error": "run_id not found or not running", "status": "error"}
+    
+    from backend.gateway import push_collect
+    push_collect(run_id, req.content, target_section=req.target_section)
+    return {"status": "buffered", "strategy": "collect", "run_id": run_id}
+
+
+@router.post("/flush/{run_id}")
+def flush_collected(run_id: str):
+    """手动刷新 Collect 缓冲区，立即合并提交所有已缓冲的修改意见。"""
+    from backend.gateway import flush_collect
+    result = flush_collect(run_id)
+    if result:
+        return {"status": "flushed", "merged_count": result["count"]}
+    return {"status": "empty", "message": "缓冲区为空"}
+
+
+@router.get("/queue/{run_id}")
+def get_queue_info(run_id: str):
+    """获取 Gateway 队列状态（供前端展示）。"""
+    from backend.gateway import get_queue_status
+    return get_queue_status(run_id)
 
 
 # ─────────────────────── SSE Generator ───────────────────────
@@ -290,6 +355,21 @@ async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerat
                         yield _sse({"type": "layout_done", "notes": state_update["layout_notes"]})
 
                 await asyncio.sleep(0)
+
+                # ── Gateway 安全检查点：消费队列中的 steer/collect 消息 ──
+                from backend.gateway import consume as gw_consume
+                gw_msg = gw_consume(run_id)
+                if gw_msg:
+                    yield _sse({
+                        "type": "gateway_inject",
+                        "strategy": gw_msg["strategy"],
+                        "instructions": gw_msg["instructions"],
+                        "count": gw_msg["count"],
+                    })
+                    # 将 gateway 指令注入到 discussion_history 供下一个节点消费
+                    with run["lock"]:
+                        inject_msg = f"🔀 [用户指令/{gw_msg['strategy']}] {gw_msg['instructions']}"
+                        run["messages"].append(inject_msg)
 
                 # Heartbeat
                 now = time.time()

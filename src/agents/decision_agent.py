@@ -14,20 +14,24 @@ from typing import Dict, Any, List
 from langchain_core.prompts import ChatPromptTemplate
 from src.state import GraphState
 from src.llm import get_llm
+from src.skills.skill_loader import build_skills_index_prompt, get_skill_index
 
 # ─────────────────────── Prompts ───────────────────────
 
-_PLAN_SYSTEM = """\
+def _build_plan_system() -> str:
+    """动态构建规划系统提示词，注入 Skills 清单 XML"""
+    skills_xml = build_skills_index_prompt()
+    return f"""\
 你是一个国家自然科学基金申请书的智能撰写系统的"决策核心（Decision Agent）"。
 你的任务是：分析当前写作进度，生成下一步需要各专业Agent执行的任务列表。
 
-可调度的 Agent 类型及说明：
-- searcher：文献搜索，负责检索相关领域最新研究、竞争格局、研究空白
+以下是当前系统中已注册的专业 Skills（能力包），根据 agent_type 字段进行任务派发：
+{skills_xml}
+
+此外还有以下内置 Agent 可供调度：
 - innovation：创新点提炼，分析已有草稿/文献后总结3-5个核心创新点
 - writer：内容写作，给定章节名称和指令后输出正文骨架草稿（若需表格数据或数学公式必须使用[PLACEHOLDER: TABLE: 描述]或[PLACEHOLDER: FORMULA: 描述]占位）
 - data：数据与表格专员，负责真实数据生成。当草稿中有TABLE占位符时派发，instructions填：ID|占位符描述
-- formula：公式推导专员。当草稿中有FORMULA占位符时派发，instructions填：ID|占位符描述
-- diagram：绘图，针对特定章节生成技术路线图/框架图/思维导图等示意图
 - layout：排版优化，检查标题层级/格式一致性/参考文献序号等排版细节
 
 章节列表（国自然面上项目标准章节）：
@@ -186,7 +190,7 @@ def run_decision_agent(state: GraphState) -> Dict[str, Any]:
     placeholders_str = "\n".join(placeholders) if placeholders else "无"
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", _PLAN_SYSTEM),
+        ("system", _build_plan_system()),
         ("user", _PLAN_USER),
     ])
 

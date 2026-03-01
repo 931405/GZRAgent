@@ -38,6 +38,7 @@ from src.agents.searcher import run_searcher
 from src.agents.writer import run_writer
 from src.agents.data_agent import run_data_agent
 from src.agents.formula_agent import run_formula_agent
+from src.skills.skill_loader import discover_skills, activate_skill
 from typing import get_args, get_origin, Annotated
 
 # ──────────────────────────────────────────────────────────────────
@@ -202,7 +203,15 @@ def run_multi_worker(state: GraphState) -> Dict[str, Any]:
 
     # 只返回状态变更字段（不传递 model_config 等只读字段以避免 reducer 冲突）
     excluded = {"model_config", "project_type", "research_topic", "max_iterations"}
-    return {k: v for k, v in merged.items() if k not in excluded}
+    updates = {k: v for k, v in merged.items() if k not in excluded}
+
+    # 自动压缩/修剪钩子（借鉴 OpenClaw: 每轮 worker 完成后触发上下文治理）
+    from src.utils.context_manager import auto_compact_state
+    compact_updates = auto_compact_state(updates)
+    if compact_updates:
+        updates.update(compact_updates)
+
+    return updates
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -252,6 +261,9 @@ def route_after_decision(state: GraphState) -> str:
 
 def build_orchestrator():
     """构建并返回编译好的多 Agent 动态调度图"""
+    # 预热 Skills 索引（仅加载元数据，不加载正文）
+    discover_skills()
+    
     workflow = StateGraph(GraphState)
 
     # 注册节点
