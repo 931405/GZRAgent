@@ -70,8 +70,12 @@ export function useSSE(runId: string | null) {
 
     const flushMessages = useCallback(() => {
         if (messageQueueRef.current.length > 0) {
-            setMessages(prev => [...prev, ...messageQueueRef.current]);
+            // CRITICAL: snapshot the queue BEFORE clearing it.
+            // setMessages queues an updater for deferred execution (React 18 batching).
+            // If we clear messageQueueRef.current first, the updater would see an empty array.
+            const batch = [...messageQueueRef.current];
             messageQueueRef.current = [];
+            setMessages(prev => [...prev, ...batch]);
         }
         updateTimeoutRef.current = null;
     }, []);

@@ -130,7 +130,7 @@ def run_searcher(state: GraphState) -> dict:
         doc_text = "\n\n".join(doc_previews)
 
         rerank_prompt = ChatPromptTemplate.from_messages([
-            ("system", "你是文献相关性评估专家。评估以下列表中每个文献与研究主题的相关性（0-10分）。\n严格返回JSON字典，格式为：{\"0\": 8, \"1\": 5}。不要输出任何其他文字和Markdown标记。"),
+            ("system", "你是文献相关性评估专家。评估以下列表中每个文献与研究主题的相关性（0-10分）。\n严格返回JSON字典，格式为：{{\"0\": 8, \"1\": 5}}。不要输出任何其他文字和Markdown标记。"),
             ("user", "研究主题: {topic}\n章节类型: {focus}\n检索意图: {intent}\n\n文献列表:\n{docs}\n\nJSON格式结果:")
         ])
         

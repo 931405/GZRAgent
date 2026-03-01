@@ -154,6 +154,15 @@ def init_vectorstore():
         if not os.path.exists(persist_dir):
             os.makedirs(persist_dir)
 
+        # ── 一致性检查：若索引文件不存在但指纹文件有记录，清除指纹以允许重新嵌入 ──
+        index_file = os.path.join(index_path, "index.faiss")
+        fp_path = os.path.abspath(FINGERPRINT_FILE)
+        if not os.path.exists(index_file) and os.path.exists(fp_path):
+            fps = _load_fingerprints()
+            if fps:
+                print(f"[RAG] ⚠️ FAISS 索引不存在但指纹记录了 {len(fps)} 个文件，清除指纹以允许重建。")
+                _save_fingerprints({})
+
         embeddings = get_embeddings()
 
         # 尝试加载已有索引

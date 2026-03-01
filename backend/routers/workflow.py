@@ -126,13 +126,17 @@ def start_workflow(req: WorkflowStartRequest):
 
 
 @router.post("/stop/{run_id}")
-def stop_workflow(run_id: str):
+async def stop_workflow(run_id: str):
     run = _runs.get(run_id)
     if not run:
         return {"error": "run_id not found", "status": "not_found"}
     with run.get("lock", threading.Lock()):
         run["cancelled"] = True
         run["status"] = "stopped"
+    # 真正取消 asyncio 任务（中断正在运行的 LLM 调用）
+    task: asyncio.Task = run.get("_async_task")
+    if task and not task.done():
+        task.cancel()
     return {"status": "stopped", "run_id": run_id}
 
 
@@ -157,7 +161,9 @@ async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerat
 
     # ── 新版全文多 Agent 模式 ──
     if req.mode in ("all", "full"):
-        yield _sse({"type": "log", "node": "system", "message": "启动多Agent动态调度工作流..."})
+        # 小延迟给 EventSource 接入时间
+        await asyncio.sleep(0.3)
+        yield _sse({"type": "log", "node": "system", "message": "🚀 启动多Agent动态调度工作流..."})
         yield _sse({"type": "workflow_mode", "mode": "multi_agent"})
 
         from src.orchestrator import build_orchestrator
@@ -184,9 +190,51 @@ async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerat
                     # ── 通用日志推送 ──
                     with run["lock"]:
                         for msg in state_update.get("discussion_history") or []:
-                            full_msg = f"[{node_name}] {msg}"
-                            run["messages"].append(full_msg)
-                            yield _sse({"type": "log", "node": node_name, "message": full_msg})
+                            # 尝试解析结构化 JSON 条目，提取可读消息
+                            display_msg = msg
+                            detected_node = node_name
+                            try:
+                                import json as _json
+                                entry = _json.loads(msg)
+                                if isinstance(entry, dict) and "agent" in entry and "content" in entry:
+                                    agent = entry["agent"]
+                                    content = entry["content"]
+                                    section = entry.get("section", "")
+                                    # 根据 agent 名称添加 emoji 前缀，使 LogPanel 能正确解析
+                                    agent_lower = agent.lower()
+                                    if "decision" in agent_lower or "orchestrat" in agent_lower:
+                                        display_msg = f"🧠 [DecisionAgent] {content}"
+                                        detected_node = "decision_agent"
+                                    elif "search" in agent_lower:
+                                        display_msg = f"[{section} / searcher] {content}" if section else f"[searcher] {content}"
+                                        detected_node = "multi_worker"
+                                    elif "writer" in agent_lower:
+                                        display_msg = f"[{section} / writer] {content}" if section else f"[writer] {content}"
+                                        detected_node = "multi_worker"
+                                    elif "reviewer" in agent_lower:
+                                        display_msg = f"[{section} / reviewer] {content}" if section else f"[reviewer] {content}"
+                                        detected_node = "review_panel"
+                                    elif "innovat" in agent_lower:
+                                        display_msg = f"💡 [InnovationAgent] {content}"
+                                        detected_node = "multi_worker"
+                                    elif "design" in agent_lower:
+                                        display_msg = f"[{section} / designer] {content}" if section else f"[designer] {content}"
+                                        detected_node = "multi_worker"
+                                    elif "layout" in agent_lower:
+                                        display_msg = f"📐 [LayoutAgent] {content}"
+                                        detected_node = "layout_agent"
+                                    elif "coherence" in agent_lower:
+                                        display_msg = f"[{section} / coherence_checker] {content}" if section else f"[coherence_checker] {content}"
+                                    elif "outline" in agent_lower:
+                                        display_msg = f"[全文 / outline_planner] {content}"
+                                    else:
+                                        display_msg = f"[{section or '-'} / {agent}] {content}"
+                            except (ValueError, TypeError):
+                                # 纯文本格式，原样使用
+                                display_msg = f"[{node_name}] {msg}"
+                            
+                            run["messages"].append(display_msg)
+                            yield _sse({"type": "log", "node": detected_node, "message": display_msg})
 
                     # ── 决策日志 ──
                     for dmsg in state_update.get("decision_log") or []:
@@ -249,6 +297,11 @@ async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerat
                     yield _sse({"type": "heartbeat"})
                     last_heartbeat = now
 
+        except asyncio.CancelledError:
+            yield _sse({"type": "stopped", "message": "工作流已被用户强制中止"})
+            with run["lock"]:
+                run["status"] = "stopped"
+            return
         except Exception as e:
             yield _sse({"type": "error", "message": str(e)})
 
@@ -368,8 +421,19 @@ async def _run_workflow_generator(run_id: str, request: Request) -> AsyncGenerat
 @router.get("/stream/{run_id}")
 async def stream_workflow(run_id: str, request: Request):
     """SSE 订阅端点"""
+    async def _wrapper():
+        """Wraps generator and stores the asyncio task for cancellation"""
+        run = _runs.get(run_id)
+        if run:
+            run["_async_task"] = asyncio.current_task()
+        try:
+            async for chunk in _run_workflow_generator(run_id, request):
+                yield chunk
+        except asyncio.CancelledError:
+            # Task was cancelled by stop_workflow — emit final stopped event
+            yield f"data: {json.dumps({'type': 'stopped', 'message': '工作流已被用户强制中止'}, ensure_ascii=False)}\n\n"
     return StreamingResponse(
-        _run_workflow_generator(run_id, request),
+        _wrapper(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
