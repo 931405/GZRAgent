@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
-import uuid7
+import uuid
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ class MessageMeta(BaseModel):
     Ref: design.md Section 3.1 → meta
     """
     message_id: str = Field(
-        default_factory=lambda: str(uuid7.create()),
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique message identifier (UUID v7 for temporal ordering)",
     )
     correlation_id: str = Field(
@@ -305,7 +305,7 @@ class A2AMessage(BaseModel):
     def _ensure_message_id(cls, v: Any) -> Any:
         """Auto-generate message_id if not provided."""
         if isinstance(v, dict) and not v.get("message_id"):
-            v["message_id"] = str(uuid7.create())
+            v["message_id"] = str(uuid.uuid4())
         return v
 
 

@@ -63,10 +63,10 @@ class WorkflowResponse(BaseModel):
 async def create_session(req: CreateSessionRequest) -> SessionResponse:
     """Create a new writing session."""
     from app.main import get_registry
-    import uuid7
+    import uuid
 
     registry = get_registry()
-    session_id = f"sess_{uuid7.create()}"
+    session_id = f"sess_{uuid.uuid4()}"
 
     entry = await registry.create_session(
         session_id=session_id,

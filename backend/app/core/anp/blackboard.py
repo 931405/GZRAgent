@@ -19,7 +19,7 @@ import time
 from typing import Any, Optional
 
 import redis.asyncio as redis
-import uuid7
+import uuid
 
 from app.models.document import (
     DocumentBlackboard,
@@ -80,7 +80,7 @@ class BlackboardManager:
         sections: Optional[list[dict]] = None,
     ) -> DocumentBlackboard:
         """Create a new empty document on the blackboard."""
-        draft_id = f"doc_{uuid7.create()}"
+        draft_id = f"doc_{uuid.uuid4()}"
         initial_hash = self._compute_hash(draft_id + str(time.time()))
 
         doc = DocumentBlackboard(

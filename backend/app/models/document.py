@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-import uuid7
+import uuid
 
 
 class DocumentState(str, Enum):
@@ -89,7 +89,7 @@ class DraftVersion(BaseModel):
     Conceptually similar to a Git commit — once created, cannot be modified.
     """
     version_hash: str = Field(
-        default_factory=lambda: str(uuid7.create()),
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique hash for this version (used for optimistic locking)",
     )
     parent_hash: str = Field(
@@ -130,7 +130,7 @@ class DocumentBlackboard(BaseModel):
     Ref: design.md Section 4.4
     """
     draft_id: str = Field(
-        default_factory=lambda: f"doc_{uuid7.create()}",
+        default_factory=lambda: f"doc_{uuid.uuid4()}",
     )
     session_id: str = Field(
         description="Owning session ID",
