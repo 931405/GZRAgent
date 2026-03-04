@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "sonner";
 
 
 
 export const metadata: Metadata = {
   title: "PD-MAWS Studio",
   description: "Protocol-Driven Multi-Agent Academic Writing System",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({
@@ -27,6 +31,7 @@ export default function RootLayout({
           <TooltipProvider delayDuration={0}>
             {children}
           </TooltipProvider>
+          <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>
     </html>

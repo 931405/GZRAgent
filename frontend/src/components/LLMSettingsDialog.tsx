@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Bot, Key, Save, RefreshCw } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -109,14 +110,14 @@ export function LLMSettingsDialog() {
             })
             if (res.ok) {
                 const data = await res.json()
-                alert(`保存成功！更新了 ${data.updated_fields?.length || 0} 个字段`)
+                toast.success(`保存成功！更新了 ${data.updated_fields?.length || 0} 个字段`)
                 setOpen(false)
             } else {
-                alert("保存失败")
+                toast.error("保存失败")
             }
         } catch (e) {
             console.error("Failed to save LLM settings", e)
-            alert("保存失败，无法连接后端")
+            toast.error("保存失败，无法连接后端")
         } finally {
             setSaving(false)
         }

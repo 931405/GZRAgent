@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Play, Settings2, Activity } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -69,7 +70,7 @@ export function ConfigDialog() {
             setOpen(false);
         } catch (error) {
             console.error("Error starting session:", error);
-            alert("Error starting session. Is the backend running?");
+            toast.error("启动会话失败，请检查后端是否运行");
         } finally {
             setIsLoading(false);
         }

@@ -66,6 +66,12 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   frontend:

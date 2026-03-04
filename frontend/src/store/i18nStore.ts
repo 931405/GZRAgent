@@ -19,9 +19,24 @@ export const t: Translations = {
     'app.state': { en: 'STATE:', zh: '状态:' },
     'app.turn': { en: 'TURN:', zh: '轮次:' },
 
+    // Connection status
+    'connection.connected': { en: 'Connected', zh: '已连接' },
+    'connection.disconnected': { en: 'Disconnected', zh: '未连接' },
+
     // Left Sidebar
     'sidebar.fleet': { en: 'Agent Fleet', zh: '智能体舰队' },
     'agent.status': { en: 'STATUS:', zh: '状态:' },
+
+    // Agent status values
+    'status.IDLE': { en: 'IDLE', zh: '空闲' },
+    'status.PLAN': { en: 'PLAN', zh: '规划中' },
+    'status.EXECUTE': { en: 'EXECUTE', zh: '执行中' },
+    'status.VERIFY': { en: 'VERIFY', zh: '校验中' },
+    'status.EMIT': { en: 'EMIT', zh: '输出中' },
+    'status.WAIT': { en: 'WAIT', zh: '等待中' },
+    'status.DONE': { en: 'DONE', zh: '已完成' },
+    'status.ERROR': { en: 'ERROR', zh: '错误' },
+    'status.INTERRUPTED': { en: 'INTERRUPTED', zh: '已中断' },
 
     // Roles
     'role.orchestrator': { en: 'Orchestrator', zh: '编排与规划' },
@@ -42,8 +57,18 @@ export const t: Translations = {
     'plane.control': { en: 'L3 Control Plane', zh: 'L3 控制面' },
     'stream.waiting': { en: 'Waiting for A2A telemetry events...', zh: '等待 A2A 遥测事件到达...' },
 
-    // Editor 
+    // Editor
     'editor.placeholder': { en: 'Drafting will appear here once agents begin...', zh: '等待智能体开始撰写草稿...' },
+
+    // Empty state
+    'empty.title': { en: 'Ready to Start', zh: '准备就绪' },
+    'empty.desc': { en: 'Click the Config button above to create a writing session and start the multi-agent collaborative workflow.', zh: '点击上方「配置」按钮，创建写作会话并启动多智能体协作流程。' },
+
+    // Tooltips
+    'tooltip.theme': { en: 'Toggle Light/Dark', zh: '切换明暗模式' },
+    'tooltip.llm': { en: 'LLM Settings', zh: '大模型设置' },
+    'tooltip.settings': { en: 'Connection Settings', zh: '连接设置' },
+    'tooltip.lang': { en: 'Switch Language', zh: '切换语言' },
 
     // Config Dialog
     'dialog.title': { en: 'Configure Writing Session', zh: '初始化写作会话' },

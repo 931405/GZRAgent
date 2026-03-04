@@ -4,11 +4,13 @@ import { useEffect, useRef } from "react"
 import { useAppStore, StreamEvent } from "@/store/appStore"
 import { useSettingsStore } from "@/store/settingsStore"
 import { generateId } from "@/lib/uuid"
+import { toast } from "sonner"
 
 export function useWebSocket() {
     const sessionId = useAppStore(state => state.sessionId)
     const addLog = useAppStore(state => state.addLog)
     const updateAgentStatus = useAppStore(state => state.updateAgentStatus)
+    const setWsConnected = useAppStore(state => state.setWsConnected)
     const wsRef = useRef<WebSocket | null>(null)
 
     useEffect(() => {
@@ -26,6 +28,8 @@ export function useWebSocket() {
 
             ws.onopen = () => {
                 reconnectCount = 0; // reset
+                setWsConnected(true);
+                toast.success("已连接到后端服务");
                 addLog({
                     id: generateId(),
                     timestamp: Date.now(),
@@ -65,9 +69,11 @@ export function useWebSocket() {
 
             ws.onclose = () => {
                 clearInterval(pinger)
+                setWsConnected(false);
                 if (reconnectCount < maxRetries) {
                     const timeoutMs = Math.min(1000 * Math.pow(2, reconnectCount), 10000);
                     reconnectCount++;
+                    toast.warning(`WebSocket 已断开，${timeoutMs / 1000}秒后重连 (${reconnectCount}/${maxRetries})`);
                     addLog({
                         id: generateId(),
                         timestamp: Date.now(),
@@ -77,6 +83,7 @@ export function useWebSocket() {
                     })
                     setTimeout(connect, timeoutMs)
                 } else {
+                    toast.error("WebSocket 连接已断开，请刷新页面重试");
                     addLog({
                         id: generateId(),
                         timestamp: Date.now(),
@@ -98,7 +105,7 @@ export function useWebSocket() {
                 wsRef.current.close()
             }
         }
-    }, [sessionId, addLog, updateAgentStatus])
+    }, [sessionId, addLog, updateAgentStatus, setWsConnected])
 
     return wsRef.current
 }

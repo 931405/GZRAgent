@@ -11,18 +11,23 @@ import {
   Bot,
   SquareTerminal,
   ShieldAlert,
-  Edit2
+  Edit2,
+  Wifi,
+  WifiOff,
+  Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useAppStore, AgentStatus, AgentInfo } from "@/store/appStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TiptapEditor } from "@/components/TiptapEditor";
 import { AgentStream } from "@/components/AgentStream";
 import { ConfigDialog } from "@/components/ConfigDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { LLMSettingsDialog } from "@/components/LLMSettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SessionHistory } from "@/components/SessionHistory";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useTranslation, useI18nStore } from "@/store/i18nStore";
 import { generateId } from "@/lib/uuid";
@@ -44,8 +49,9 @@ const AgentRoleIcons: Record<string, React.ReactNode> = {
 export default function StudioPage() {
   const t = useTranslation();
   const { lang, toggleLang } = useI18nStore();
-  const { sessionState, agents, addLog, updateAgentStatus, setSession, globalTurn, updateDocument } = useAppStore();
+  const { sessionState, sessionId, agents, addLog, updateAgentStatus, setSession, globalTurn, updateDocument, wsConnected, documentContent } = useAppStore();
   const [isSimulating, setIsSimulating] = useState(false);
+  const isDev = process.env.NODE_ENV === 'development';
 
   useWebSocket();
 
@@ -111,23 +117,54 @@ export default function StudioPage() {
             <span>{t('app.turn')} {globalTurn}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <LLMSettingsDialog />
-          <SettingsDialog />
-          <Button variant="ghost" size="sm" onClick={toggleLang} className="h-8 px-2 text-xs font-medium">
-            {lang === 'en' ? '中' : 'En'}
-          </Button>
+        <div className="flex items-center gap-1">
+          {/* Connection indicator */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs">
+                {wsConnected ? (
+                  <><Wifi size={14} className="text-emerald-500" /><span className="text-emerald-500 hidden sm:inline">{t('connection.connected' as any)}</span></>
+                ) : (
+                  <><WifiOff size={14} className="text-red-400" /><span className="text-red-400 hidden sm:inline">{t('connection.disconnected' as any)}</span></>
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{wsConnected ? t('connection.connected' as any) : t('connection.disconnected' as any)}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild><span><ThemeToggle /></span></TooltipTrigger>
+            <TooltipContent>{t('tooltip.theme' as any)}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild><span><LLMSettingsDialog /></span></TooltipTrigger>
+            <TooltipContent>{t('tooltip.llm' as any)}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild><span><SettingsDialog /></span></TooltipTrigger>
+            <TooltipContent>{t('tooltip.settings' as any)}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={toggleLang} className="h-8 px-2 text-xs font-medium">
+                {lang === 'en' ? '中' : 'En'}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('tooltip.lang' as any)}</TooltipContent>
+          </Tooltip>
           <ConfigDialog />
-          <Button
-            size="sm"
-            className="gap-2 h-8"
-            onClick={runSimulationStep}
-            disabled={isSimulating}
-          >
-            <Play size={14} className={isSimulating ? "opacity-50" : ""} />
-            {isSimulating ? t('app.simulating') : t('app.mock')}
-          </Button>
+          {isDev && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2 h-8"
+              onClick={runSimulationStep}
+              disabled={isSimulating}
+            >
+              <Play size={14} className={isSimulating ? "opacity-50" : ""} />
+              {isSimulating ? t('app.simulating') : t('app.mock')}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -144,6 +181,8 @@ export default function StudioPage() {
               <AgentItem key={agent.id} agent={agent} />
             ))}
           </div>
+          <Separator />
+          <SessionHistory />
         </aside>
 
         {/* Center - Document Blackboard & Topology */}
@@ -166,7 +205,17 @@ export default function StudioPage() {
             </div>
 
             <TabsContent value="blackboard" className="flex-1 overflow-hidden m-0 border-none outline-none">
-              <TiptapEditor />
+              {!sessionId && !documentContent ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 gap-4">
+                  <div className="p-4 rounded-full bg-primary/10">
+                    <Sparkles size={32} className="text-primary" />
+                  </div>
+                  <h2 className="text-xl font-semibold">{t('empty.title' as any)}</h2>
+                  <p className="text-muted-foreground max-w-md text-sm">{t('empty.desc' as any)}</p>
+                </div>
+              ) : (
+                <TiptapEditor />
+              )}
             </TabsContent>
 
             <TabsContent value="topology" className="flex-1 overflow-hidden m-0 p-4 border-none outline-none">
@@ -225,7 +274,7 @@ function AgentItem({ agent }: { agent: AgentInfo }) {
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-medium text-muted-foreground">{t('agent.status')}</span>
           <span className={`text-[10px] font-mono font-bold tracking-tight uppercase \${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-            {agent.status}
+            {t(`status.${agent.status}` as any) || agent.status}
           </span>
         </div>
         {isActive && (

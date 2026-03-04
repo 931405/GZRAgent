@@ -26,12 +26,15 @@ interface AppState {
     agents: Record<string, AgentInfo>;
     logs: StreamEvent[];
     documentContent: string;
+    wsConnected: boolean;
 
     // Actions
     setSession: (id: string, state: SessionState) => void;
     updateAgentStatus: (id: string, status: AgentStatus) => void;
     addLog: (event: StreamEvent) => void;
     updateDocument: (content: string) => void;
+    setWsConnected: (connected: boolean) => void;
+    clearSession: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -46,6 +49,7 @@ export const useAppStore = create<AppState>((set) => ({
     },
     logs: [],
     documentContent: '',
+    wsConnected: false,
 
     setSession: (id, state) => set({ sessionId: id, sessionState: state }),
     updateAgentStatus: (id, status) => set((state) => ({
@@ -56,4 +60,6 @@ export const useAppStore = create<AppState>((set) => ({
     })),
     addLog: (event) => set((state) => ({ logs: [...state.logs, event] })),
     updateDocument: (content) => set({ documentContent: content }),
+    setWsConnected: (connected) => set({ wsConnected: connected }),
+    clearSession: () => set({ sessionId: null, sessionState: 'INIT', globalTurn: 0, logs: [], documentContent: '' }),
 }));
