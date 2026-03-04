@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { useAppStore, StreamEvent } from "@/store/appStore"
+import { generateId } from "@/lib/uuid"
 
 export function useWebSocket() {
     const sessionId = useAppStore(state => state.sessionId)
@@ -26,7 +27,7 @@ export function useWebSocket() {
             ws.onopen = () => {
                 reconnectCount = 0; // reset
                 addLog({
-                    id: crypto.randomUUID(),
+                    id: generateId(),
                     timestamp: Date.now(),
                     source: 'System',
                     intent: 'SYSTEM_INFO',
@@ -68,7 +69,7 @@ export function useWebSocket() {
                     const timeoutMs = Math.min(1000 * Math.pow(2, reconnectCount), 10000);
                     reconnectCount++;
                     addLog({
-                        id: crypto.randomUUID(),
+                        id: generateId(),
                         timestamp: Date.now(),
                         source: 'System',
                         intent: 'WARNING',
@@ -77,7 +78,7 @@ export function useWebSocket() {
                     setTimeout(connect, timeoutMs)
                 } else {
                     addLog({
-                        id: crypto.randomUUID(),
+                        id: generateId(),
                         timestamp: Date.now(),
                         source: 'System',
                         intent: 'ERROR',

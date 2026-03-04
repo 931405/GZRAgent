@@ -22,6 +22,7 @@ import { AgentStream } from "@/components/AgentStream";
 import { ConfigDialog } from "@/components/ConfigDialog";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useTranslation, useI18nStore } from "@/store/i18nStore";
+import { generateId } from "@/lib/uuid";
 import dynamic from "next/dynamic";
 
 const AgentTopology = dynamic(() => import("@/components/AgentTopology").then(mod => mod.AgentTopology), {
@@ -54,7 +55,7 @@ export default function StudioPage() {
     setTimeout(() => {
       updateAgentStatus("pi", "PLAN");
       addLog({
-        id: crypto.randomUUID(), timestamp: Date.now(), source: "PI_Agent", target: "System",
+        id: generateId(), timestamp: Date.now(), source: "PI_Agent", target: "System",
         intent: "DECOMPOSE_TASK", message: "**Goal**: Draft 'Introduction' section.\n1. Literature search\n2. Compose draft\n3. Red Team Review"
       });
     }, 1000);
@@ -64,7 +65,7 @@ export default function StudioPage() {
       updateAgentStatus("pi", "WAIT");
       updateAgentStatus("researcher", "EXECUTE");
       addLog({
-        id: crypto.randomUUID(), timestamp: Date.now(), source: "PI_Agent", target: "Researcher",
+        id: generateId(), timestamp: Date.now(), source: "PI_Agent", target: "Researcher",
         intent: "REQUEST_EVIDENCE", message: "Find papers on 'Transformer self-attention efficiency' from 2021-2023."
       });
     }, 3000);
@@ -73,7 +74,7 @@ export default function StudioPage() {
       updateAgentStatus("researcher", "IDLE");
       updateAgentStatus("writer", "EXECUTE");
       addLog({
-        id: crypto.randomUUID(), timestamp: Date.now(), source: "Researcher", target: "Writer_01",
+        id: generateId(), timestamp: Date.now(), source: "Researcher", target: "Writer_01",
         intent: "PROVIDE_EVIDENCE", message: "Found 3 papers. Core claim: Sparse attention reduces bottleneck [doi:10.xxx/abc]."
       });
       updateDocument("<h2>1. Introduction</h2><p>Transformers have revolutionized sequential modeling, but self-attention efficiency remains a bottleneck.</p>");
@@ -81,7 +82,7 @@ export default function StudioPage() {
 
     setTimeout(() => {
       updateAgentStatus("writer", "VERIFY");
-      addLog({ id: crypto.randomUUID(), timestamp: Date.now(), source: "Writer_01", target: "Blackboard", intent: "PATCH_DRAFT", message: "Appended section 1 content." });
+      addLog({ id: generateId(), timestamp: Date.now(), source: "Writer_01", target: "Blackboard", intent: "PATCH_DRAFT", message: "Appended section 1 content." });
     }, 8000);
 
     setTimeout(() => {
