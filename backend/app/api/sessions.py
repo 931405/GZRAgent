@@ -3,10 +3,13 @@ FastAPI REST API routes for session management and document operations.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["sessions", "documents"])
 
