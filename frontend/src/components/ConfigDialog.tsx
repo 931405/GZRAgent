@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useAppStore } from "@/store/appStore"
+import { useSettingsStore } from "@/store/settingsStore"
 import { useTranslation } from "@/store/i18nStore"
 
 export function ConfigDialog() {
@@ -33,8 +34,7 @@ export function ConfigDialog() {
             // 1. Create the session
             const outlineSection = outline.split('\n').filter(s => s.trim()).map(s => ({ title: s.trim() }));
 
-            const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-            const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://${HOST}:8000`;
+            const API_BASE = useSettingsStore.getState().getApiBase();
 
             const sessionRes = await fetch(`${API_BASE}/api/sessions`, {
                 method: 'POST',

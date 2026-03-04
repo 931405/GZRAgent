@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { useAppStore, StreamEvent } from "@/store/appStore"
+import { useSettingsStore } from "@/store/settingsStore"
 import { generateId } from "@/lib/uuid"
 
 export function useWebSocket() {
@@ -18,8 +19,7 @@ export function useWebSocket() {
         const maxRetries = 5;
 
         const connect = () => {
-            const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-            const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || `ws://${HOST}:8000`;
+            const WS_BASE = useSettingsStore.getState().getWsBase();
             const wsUrl = `${WS_BASE}/api/ws/${sessionId}`;
             const ws = new WebSocket(wsUrl)
             wsRef.current = ws
