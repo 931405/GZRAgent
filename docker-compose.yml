@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # PostgreSQL 16 - 业务核心数据库
   postgres:
@@ -10,7 +8,7 @@ services:
       POSTGRES_USER: pdmaws
       POSTGRES_PASSWORD: pdmaws_dev_2024
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +24,7 @@ services:
     container_name: pdmaws-redis
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:

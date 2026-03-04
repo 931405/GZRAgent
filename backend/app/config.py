@@ -49,10 +49,10 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # ---- PostgreSQL ----
-    database_url: str = "postgresql+asyncpg://pdmaws:pdmaws_dev_2024@localhost:5432/pdmaws"
+    database_url: str = "postgresql+asyncpg://pdmaws:pdmaws_dev_2024@localhost:5433/pdmaws"
 
     # ---- Redis ----
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:6380/0"
 
     # ---- Qdrant ----
     qdrant_host: str = "localhost"
