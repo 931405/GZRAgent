@@ -17,6 +17,13 @@ export interface StreamEvent {
     target?: string;
     intent: string;
     message: string;
+    details?: {
+        prompt?: string;
+        result?: string;
+        tokens?: number;
+        duration_ms?: number;
+        model?: string;
+    };
 }
 
 interface AppState {

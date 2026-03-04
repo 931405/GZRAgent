@@ -62,19 +62,24 @@ async def _broadcast_event(
     message: str,
     agent_id: str | None = None,
     agent_status: str | None = None,
+    details: dict | None = None,
 ) -> None:
     """Send a telemetry event and optional agent state change to all WebSocket clients."""
     from app.api.websocket import manager
 
+    event_data = {
+        "id": str(uuid.uuid4()),
+        "timestamp": int(time.time() * 1000),
+        "source": source,
+        "intent": intent,
+        "message": message,
+    }
+    if details:
+        event_data["details"] = details
+
     await manager.broadcast(session_id, {
         "type": "telemetry",
-        "data": {
-            "id": str(uuid.uuid4()),
-            "timestamp": int(time.time() * 1000),
-            "source": source,
-            "intent": intent,
-            "message": message,
-        },
+        "data": event_data,
     })
 
     if agent_id and agent_status:
@@ -169,7 +174,9 @@ async def decompose_task(state: WritingState) -> WritingState:
         ),
     ]
 
+    t0 = time.time()
     response = await llm.complete(messages, temperature=0.5, max_tokens=2000)
+    elapsed = int((time.time() - t0) * 1000)
 
     # Parse response into sub_tasks
     sections = response.content.split("---")
@@ -202,6 +209,13 @@ async def decompose_task(state: WritingState) -> WritingState:
         session_id, "PI_Agent", "DELIVER_CONTENT",
         f"大纲已分解为 {len(sub_tasks)} 个子任务: {task_list}",
         agent_id="pi", agent_status="DONE",
+        details={
+            "prompt": messages[-1].content,
+            "result": response.content,
+            "tokens": response.total_tokens,
+            "duration_ms": elapsed,
+            "model": response.model,
+        },
     )
 
     return {
@@ -263,11 +277,20 @@ async def write_sections(state: WritingState) -> WritingState:
         ]
 
         try:
+            t0 = time.time()
             response = await llm.complete(messages, temperature=0.7, max_tokens=3000)
+            elapsed = int((time.time() - t0) * 1000)
             draft_sections[section_id] = response.content
             await _broadcast_event(
                 session_id, "Writer_Agent", "DELIVER_CONTENT",
                 f"已完成章节草稿: {title} ({len(response.content)} 字)",
+                details={
+                    "prompt": instructions[:300] + "..." if len(instructions) > 300 else instructions,
+                    "result": response.content,
+                    "tokens": response.total_tokens,
+                    "duration_ms": elapsed,
+                    "model": response.model,
+                },
             )
         except Exception as e:
             logger.error("Writer failed for %s: %s", section_id, e)
@@ -338,7 +361,9 @@ async def gather_evidence(state: WritingState) -> WritingState:
         ]
 
         try:
+            t0 = time.time()
             response = await llm.complete(messages, temperature=0.3, max_tokens=1500)
+            elapsed = int((time.time() - t0) * 1000)
             refs = [
                 {"suggestion": ref.strip(), "section": section_id}
                 for ref in response.content.split("---")
@@ -348,6 +373,12 @@ async def gather_evidence(state: WritingState) -> WritingState:
             await _broadcast_event(
                 session_id, "Researcher_Agent", "DELIVER_CONTENT",
                 f"已为「{title}」找到 {len(refs)} 条文献建议",
+                details={
+                    "result": response.content,
+                    "tokens": response.total_tokens,
+                    "duration_ms": elapsed,
+                    "model": response.model,
+                },
             )
         except Exception as e:
             logger.error("Researcher failed for %s: %s", section_id, e)
@@ -485,12 +516,20 @@ async def integrate_draft(state: WritingState) -> WritingState:
     ]
 
     try:
+        t0 = time.time()
         response = await llm.complete(messages, temperature=0.4, max_tokens=6000)
+        elapsed = int((time.time() - t0) * 1000)
         integrated = response.content
         await _broadcast_event(
             session_id, "PI_Agent", "DELIVER_CONTENT",
             f"论文初稿整合完成 ({len(integrated)} 字)",
             agent_id="pi", agent_status="DONE",
+            details={
+                "result": integrated[:500] + "..." if len(integrated) > 500 else integrated,
+                "tokens": response.total_tokens,
+                "duration_ms": elapsed,
+                "model": response.model,
+            },
         )
     except Exception as e:
         logger.error("Integration failed: %s", e)
@@ -554,12 +593,13 @@ async def red_team_review(state: WritingState) -> WritingState:
     ]
 
     try:
+        t0 = time.time()
         response = await llm.complete(messages, temperature=0.3, max_tokens=2000)
+        elapsed = int((time.time() - t0) * 1000)
         review_content = response.content
 
         # Try to determine pass/fail from response
         review_passed = "PASS" in review_content.upper() or "通过" in review_content
-        # If the review mentions a score >= 7, also consider it passed
         import re
         score_match = re.search(r'(\d+)\s*/?\s*10', review_content)
         if score_match:
@@ -571,8 +611,14 @@ async def red_team_review(state: WritingState) -> WritingState:
         status_msg = "审查通过" if review_passed else "审查未通过，需要修订"
         await _broadcast_event(
             session_id, "RedTeam_Agent", "DELIVER_CONTENT",
-            f"{status_msg}\n{review_content[:200]}...",
+            f"{status_msg}",
             agent_id="reviewer", agent_status="DONE",
+            details={
+                "result": review_content,
+                "tokens": response.total_tokens,
+                "duration_ms": elapsed,
+                "model": response.model,
+            },
         )
     except Exception as e:
         logger.error("Red team review failed: %s", e)
@@ -643,12 +689,20 @@ async def revise_draft(state: WritingState) -> WritingState:
     ]
 
     try:
+        t0 = time.time()
         response = await llm.complete(messages, temperature=0.5, max_tokens=6000)
+        elapsed = int((time.time() - t0) * 1000)
         revised = response.content
         await _broadcast_event(
             session_id, "Writer_Agent", "DELIVER_CONTENT",
             f"论文修订完成 ({len(revised)} 字)",
             agent_id="writer", agent_status="DONE",
+            details={
+                "result": revised[:500] + "..." if len(revised) > 500 else revised,
+                "tokens": response.total_tokens,
+                "duration_ms": elapsed,
+                "model": response.model,
+            },
         )
         await _broadcast_draft(session_id, revised)
     except Exception as e:
@@ -708,11 +762,19 @@ async def format_document(state: WritingState) -> WritingState:
     ]
 
     try:
+        t0 = time.time()
         response = await llm.complete(messages, temperature=0.3, max_tokens=6000)
+        elapsed = int((time.time() - t0) * 1000)
         final = response.content
         await _broadcast_event(
             session_id, "System", "DELIVER_CONTENT",
             f"格式化完成，论文已就绪 ({len(final)} 字)",
+            details={
+                "result": final[:500] + "..." if len(final) > 500 else final,
+                "tokens": response.total_tokens,
+                "duration_ms": elapsed,
+                "model": response.model,
+            },
         )
     except Exception as e:
         logger.error("Formatting failed: %s", e)
