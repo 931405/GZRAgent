@@ -14,7 +14,11 @@ import {
   Edit2,
   Wifi,
   WifiOff,
-  Sparkles
+  Sparkles,
+  PieChart,
+  BookText,
+  Type,
+  Square
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -30,7 +34,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { SessionHistory } from "@/components/SessionHistory";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useTranslation, useI18nStore } from "@/store/i18nStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { generateId } from "@/lib/uuid";
+import { toast } from "sonner";
 import dynamic from "next/dynamic";
 
 const AgentTopology = dynamic(() => import("@/components/AgentTopology").then(mod => mod.AgentTopology), {
@@ -44,6 +50,9 @@ const AgentRoleIcons: Record<string, React.ReactNode> = {
   "Academic Writer": <Edit2 size={16} />,
   "Literature": <SquareTerminal size={16} />,
   "Reviewer": <ShieldAlert size={16} />,
+  "Visualization": <PieChart size={16} />,
+  "Reference": <BookText size={16} />,
+  "Typesetter": <Type size={16} />,
 };
 
 export default function StudioPage() {
@@ -52,8 +61,33 @@ export default function StudioPage() {
   const { sessionState, sessionId, agents, addLog, updateAgentStatus, setSession, globalTurn, updateDocument, wsConnected, documentContent } = useAppStore();
   const [isSimulating, setIsSimulating] = useState(false);
   const isDev = process.env.NODE_ENV === 'development';
+  const getApiBase = useSettingsStore(state => state.getApiBase);
+  const [isStopping, setIsStopping] = useState(false);
 
   useWebSocket();
+
+  // Stop the current backend workflow
+  const stopWorkflow = async () => {
+    if (!sessionId) return;
+    setIsStopping(true);
+    try {
+      const res = await fetch(`${getApiBase()}/api/workflow/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      if (res.ok) {
+        toast.info("已发送停止指令");
+      } else {
+        toast.error("终止工作流失败");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("网络错误");
+    } finally {
+      setIsStopping(false);
+    }
+  };
 
   // A tiny simulation function to test the UI without backend attached yet
   const runSimulationStep = () => {
@@ -163,6 +197,18 @@ export default function StudioPage() {
             >
               <Play size={14} className={isSimulating ? "opacity-50" : ""} />
               {isSimulating ? t('app.simulating') : t('app.mock')}
+            </Button>
+          )}
+          {sessionState === 'RUNNING' && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="gap-2 h-8 ml-1"
+              onClick={stopWorkflow}
+              disabled={isStopping}
+            >
+              <Square size={14} className={isStopping ? "opacity-50" : "fill-current"} />
+              <span className="hidden sm:inline">终止工作流</span>
             </Button>
           )}
         </div>

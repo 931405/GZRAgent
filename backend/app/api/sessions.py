@@ -4,6 +4,7 @@ FastAPI REST API routes for session management and document operations.
 from __future__ import annotations
 
 import logging
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,9 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["sessions", "documents"])
+
+# Global dictionary to track active workflow tasks for cancellation
+active_workflows: Dict[str, asyncio.Task] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +60,13 @@ class WorkflowResponse(BaseModel):
     session_id: str
     status: str
     result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StopWorkflowRequest(BaseModel):
+    session_id: str
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -216,12 +227,49 @@ async def start_workflow(req: StartWorkflowRequest) -> WorkflowResponse:
             })
 
     # Fire and forget — workflow runs in the background
-    asyncio.create_task(_run_workflow())
+    task = asyncio.create_task(_run_workflow())
+    active_workflows[req.session_id] = task
 
     return WorkflowResponse(
         session_id=req.session_id,
         status="started",
         result={"message": "Workflow started in background"},
+    )
+
+
+@router.post("/workflow/stop", response_model=WorkflowResponse)
+async def stop_workflow(req: StopWorkflowRequest) -> WorkflowResponse:
+    """Stop a running writing workflow for a session."""
+    task = active_workflows.get(req.session_id)
+    if task and not task.done():
+        task.cancel()
+        active_workflows.pop(req.session_id, None)
+        
+        # Notify UI
+        from app.api.websocket import manager
+        await manager.broadcast(req.session_id, {
+            "type": "telemetry",
+            "data": {
+                "id": str(__import__("uuid").uuid4()),
+                "timestamp": int(__import__("time").time() * 1000),
+                "source": "System",
+                "intent": "ERROR",
+                "message": "Workflow stopped by user",
+            },
+        })
+        await manager.broadcast(req.session_id, {
+            "type": "workflow_complete",
+            "status": "halted",
+        })
+        return WorkflowResponse(
+            session_id=req.session_id,
+            status="stopped",
+            result={"message": "Workflow stopped successfully"}
+        )
+    return WorkflowResponse(
+        session_id=req.session_id,
+        status="not_running",
+        result={"message": "No active workflow found for this session"}
     )
 
 

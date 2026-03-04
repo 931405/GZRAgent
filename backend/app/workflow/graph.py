@@ -410,8 +410,9 @@ async def generate_diagrams(state: WritingState) -> WritingState:
     logger.info("Workflow: generate_diagrams")
 
     await _broadcast_event(
-        session_id, "System", "TASK_ASSIGNED",
+        session_id, "Diagram_Agent", "TASK_ASSIGNED",
         "正在分析论文内容并生成图表建议...",
+        agent_id="diagram", agent_status="EXECUTE",
     )
 
     from app.core.l1.llm_provider import ChatMessage
@@ -448,15 +449,17 @@ async def generate_diagrams(state: WritingState) -> WritingState:
         response = await llm.complete(messages, temperature=0.5, max_tokens=1500)
         diagrams = [{"type": "mermaid", "description": response.content}]
         await _broadcast_event(
-            session_id, "System", "DELIVER_CONTENT",
+            session_id, "Diagram_Agent", "DELIVER_CONTENT",
             "图表建议已生成",
+            agent_id="diagram", agent_status="DONE",
         )
     except Exception as e:
         logger.error("Diagram generation failed: %s", e)
         diagrams = []
         await _broadcast_event(
-            session_id, "System", "ERROR",
+            session_id, "Diagram_Agent", "ERROR",
             f"图表生成失败: {str(e)[:100]}",
+            agent_id="diagram", agent_status="DONE",
         )
 
     return {
@@ -736,8 +739,9 @@ async def format_document(state: WritingState) -> WritingState:
     logger.info("Workflow: format_document")
 
     await _broadcast_event(
-        session_id, "System", "TASK_ASSIGNED",
+        session_id, "Format_Agent", "TASK_ASSIGNED",
         "开始应用学术论文格式化...",
+        agent_id="format", agent_status="EXECUTE",
     )
 
     from app.core.l1.llm_provider import ChatMessage
@@ -772,8 +776,9 @@ async def format_document(state: WritingState) -> WritingState:
         elapsed = int((time.time() - t0) * 1000)
         final = response.content
         await _broadcast_event(
-            session_id, "System", "DELIVER_CONTENT",
+            session_id, "Format_Agent", "DELIVER_CONTENT",
             f"格式化完成，论文已就绪 ({len(final)} 字)",
+            agent_id="format", agent_status="DONE",
             details={
                 "result": final[:500] + "..." if len(final) > 500 else final,
                 "tokens": response.total_tokens,
@@ -785,8 +790,9 @@ async def format_document(state: WritingState) -> WritingState:
         logger.error("Formatting failed: %s", e)
         final = integrated
         await _broadcast_event(
-            session_id, "System", "ERROR",
+            session_id, "Format_Agent", "ERROR",
             f"格式化失败: {str(e)[:100]}",
+            agent_id="format", agent_status="DONE",
         )
 
     await _broadcast_draft(session_id, final)
