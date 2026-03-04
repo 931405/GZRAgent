@@ -240,7 +240,7 @@ async def get_token_usage() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# LLM Settings endpoints
+# LLM Settings endpoints (database-persisted, API keys encrypted)
 # ---------------------------------------------------------------------------
 
 class LLMProviderSettings(BaseModel):
@@ -264,55 +264,130 @@ class LLMSettingsUpdateRequest(BaseModel):
     agents: Optional[Dict[str, AgentLLMAssignment]] = None
 
 
-@router.get("/settings/llm", response_model=LLMSettingsResponse)
-async def get_llm_settings() -> LLMSettingsResponse:
-    """Get current LLM provider settings (keys are masked)."""
+# Keys that contain sensitive data (will be encrypted in DB)
+_SENSITIVE_KEYS = {
+    "provider.openai.api_key",
+    "provider.deepseek.api_key",
+    "provider.gemini.api_key",
+    "provider.custom.api_key",
+}
+
+PROVIDER_NAMES = ["openai", "deepseek", "gemini", "ollama", "custom"]
+PROVIDER_FIELDS = ["api_key", "base_url", "default_model"]
+AGENT_NAMES = ["pi", "writer", "researcher", "red_team", "diagram", "format", "data_analyst"]
+
+
+async def _db_get_settings() -> dict[str, str]:
+    """Read all LLM settings from the database."""
+    from app.db import get_session_factory
+    from app.models.llm_settings import LLMSettingsRow
+    from app.crypto import decrypt
+    from sqlmodel import select
+
+    factory = get_session_factory()
+    result: dict[str, str] = {}
+    async with factory() as session:
+        stmt = select(LLMSettingsRow)
+        rows = (await session.execute(stmt)).scalars().all()
+        for row in rows:
+            val = decrypt(row.config_value) if row.is_encrypted else row.config_value
+            result[row.config_key] = val
+    return result
+
+
+async def _db_put_settings(updates: dict[str, str]) -> list[str]:
+    """Write LLM settings to the database. Returns list of updated keys."""
+    from app.db import get_session_factory
+    from app.models.llm_settings import LLMSettingsRow
+    from app.crypto import encrypt
+    from sqlmodel import select
+    from datetime import datetime, timezone
+
+    factory = get_session_factory()
+    updated_keys: list[str] = []
+
+    async with factory() as session:
+        for key, value in updates.items():
+            is_sensitive = key in _SENSITIVE_KEYS
+            stored_value = encrypt(value) if is_sensitive else value
+
+            # Upsert: find existing or create
+            stmt = select(LLMSettingsRow).where(LLMSettingsRow.config_key == key)
+            existing = (await session.execute(stmt)).scalars().first()
+            if existing:
+                existing.config_value = stored_value
+                existing.is_encrypted = is_sensitive
+                existing.updated_at = datetime.now(timezone.utc)
+            else:
+                session.add(LLMSettingsRow(
+                    config_key=key,
+                    config_value=stored_value,
+                    is_encrypted=is_sensitive,
+                ))
+            updated_keys.append(key)
+
+        await session.commit()
+    return updated_keys
+
+
+def _env_defaults() -> dict[str, str]:
+    """Get default settings from environment (.env) as fallback."""
     from app.config import get_settings
     s = get_settings()
+    defaults: dict[str, str] = {}
 
-    def mask_key(key: str) -> str:
-        if not key or len(key) < 8:
-            return "****" if key else ""
-        return key[:4] + "****" + key[-4:]
-
-    providers = {
-        "openai": LLMProviderSettings(
-            api_key=mask_key(s.openai_api_key),
-            base_url=s.openai_base_url,
-            default_model=s.openai_default_model,
-        ),
-        "deepseek": LLMProviderSettings(
-            api_key=mask_key(s.deepseek_api_key),
-            base_url=s.deepseek_base_url,
-            default_model=s.deepseek_default_model,
-        ),
-        "gemini": LLMProviderSettings(
-            api_key=mask_key(s.gemini_api_key),
-            base_url="",
-            default_model=s.gemini_default_model,
-        ),
-        "ollama": LLMProviderSettings(
-            api_key="",
-            base_url=s.ollama_base_url,
-            default_model=s.ollama_default_model,
-        ),
-        "custom": LLMProviderSettings(
-            api_key=mask_key(s.custom_llm_api_key),
-            base_url=s.custom_llm_base_url,
-            default_model=s.custom_llm_default_model,
-        ),
+    field_map = {
+        "openai": (s.openai_api_key, s.openai_base_url, s.openai_default_model),
+        "deepseek": (s.deepseek_api_key, s.deepseek_base_url, s.deepseek_default_model),
+        "gemini": (s.gemini_api_key, "", s.gemini_default_model),
+        "ollama": ("", s.ollama_base_url, s.ollama_default_model),
+        "custom": (s.custom_llm_api_key, s.custom_llm_base_url, s.custom_llm_default_model),
     }
+    for pname, (api_key, base_url, model) in field_map.items():
+        defaults[f"provider.{pname}.api_key"] = api_key
+        defaults[f"provider.{pname}.base_url"] = base_url
+        defaults[f"provider.{pname}.default_model"] = model
 
-    agent_names = ["pi", "writer", "researcher", "red_team", "diagram", "format", "data_analyst"]
+    for aname in AGENT_NAMES:
+        provider_attr = f"agent_{aname}_provider"
+        model_attr = f"agent_{aname}_model"
+        pval = getattr(s, provider_attr, "openai")
+        defaults[f"agent.{aname}.provider"] = pval.value if hasattr(pval, "value") else str(pval)
+        defaults[f"agent.{aname}.model"] = getattr(s, model_attr, "")
+
+    return defaults
+
+
+def _mask_key(key: str) -> str:
+    if not key or len(key) < 8:
+        return "****" if key else ""
+    return key[:4] + "****" + key[-4:]
+
+
+@router.get("/settings/llm", response_model=LLMSettingsResponse)
+async def get_llm_settings() -> LLMSettingsResponse:
+    """Get current LLM provider settings. API keys are masked. DB takes priority over .env."""
+    # Merge: env defaults < database overrides
+    settings = _env_defaults()
+    try:
+        db_settings = await _db_get_settings()
+        settings.update(db_settings)
+    except Exception as e:
+        logger.warning("Failed to read LLM settings from DB (using env fallback): %s", e)
+
+    providers: Dict[str, LLMProviderSettings] = {}
+    for pname in PROVIDER_NAMES:
+        providers[pname] = LLMProviderSettings(
+            api_key=_mask_key(settings.get(f"provider.{pname}.api_key", "")),
+            base_url=settings.get(f"provider.{pname}.base_url", ""),
+            default_model=settings.get(f"provider.{pname}.default_model", ""),
+        )
+
     agents: Dict[str, AgentLLMAssignment] = {}
-    for name in agent_names:
-        provider_attr = f"agent_{name}_provider"
-        model_attr = f"agent_{name}_model"
-        agents[name] = AgentLLMAssignment(
-            provider=getattr(s, provider_attr, "openai").value
-            if hasattr(getattr(s, provider_attr, ""), "value")
-            else str(getattr(s, provider_attr, "openai")),
-            model=getattr(s, model_attr, ""),
+    for aname in AGENT_NAMES:
+        agents[aname] = AgentLLMAssignment(
+            provider=settings.get(f"agent.{aname}.provider", "openai"),
+            model=settings.get(f"agent.{aname}.model", ""),
         )
 
     return LLMSettingsResponse(providers=providers, agents=agents)
@@ -320,47 +395,62 @@ async def get_llm_settings() -> LLMSettingsResponse:
 
 @router.put("/settings/llm")
 async def update_llm_settings(req: LLMSettingsUpdateRequest) -> Dict[str, Any]:
-    """Update LLM provider settings at runtime."""
-    from app.config import get_settings, LLMProviderType
-    s = get_settings()
-
-    updated_fields: List[str] = []
+    """Update LLM provider settings. Persisted to database with encryption."""
+    updates: dict[str, str] = {}
 
     if req.providers:
-        field_map = {
-            "openai": ("openai_api_key", "openai_base_url", "openai_default_model"),
-            "deepseek": ("deepseek_api_key", "deepseek_base_url", "deepseek_default_model"),
-            "gemini": ("gemini_api_key", "", "gemini_default_model"),
-            "ollama": ("", "ollama_base_url", "ollama_default_model"),
-            "custom": ("custom_llm_api_key", "custom_llm_base_url", "custom_llm_default_model"),
-        }
-        for provider_name, provider_settings in req.providers.items():
-            if provider_name not in field_map:
+        for pname, p in req.providers.items():
+            if pname not in PROVIDER_NAMES:
                 continue
-            key_field, url_field, model_field = field_map[provider_name]
-            # Only update api_key if it's not a masked value
-            if key_field and provider_settings.api_key and "****" not in provider_settings.api_key:
-                setattr(s, key_field, provider_settings.api_key)
-                updated_fields.append(key_field)
-            if url_field and provider_settings.base_url:
-                setattr(s, url_field, provider_settings.base_url)
-                updated_fields.append(url_field)
-            if model_field and provider_settings.default_model:
-                setattr(s, model_field, provider_settings.default_model)
-                updated_fields.append(model_field)
+            # Only update API key if not masked
+            if p.api_key and "****" not in p.api_key:
+                updates[f"provider.{pname}.api_key"] = p.api_key
+            if p.base_url:
+                updates[f"provider.{pname}.base_url"] = p.base_url
+            if p.default_model:
+                updates[f"provider.{pname}.default_model"] = p.default_model
 
     if req.agents:
-        for agent_name, assignment in req.agents.items():
-            provider_attr = f"agent_{agent_name}_provider"
-            model_attr = f"agent_{agent_name}_model"
-            if hasattr(s, provider_attr) and assignment.provider:
+        for aname, a in req.agents.items():
+            if a.provider:
+                updates[f"agent.{aname}.provider"] = a.provider
+            updates[f"agent.{aname}.model"] = a.model
+
+    # Persist to database
+    updated_keys = await _db_put_settings(updates)
+
+    # Also update in-memory Settings singleton so changes take effect immediately
+    from app.config import get_settings, LLMProviderType
+    s = get_settings()
+    field_map = {
+        "openai": ("openai_api_key", "openai_base_url", "openai_default_model"),
+        "deepseek": ("deepseek_api_key", "deepseek_base_url", "deepseek_default_model"),
+        "gemini": ("gemini_api_key", "", "gemini_default_model"),
+        "ollama": ("", "ollama_base_url", "ollama_default_model"),
+        "custom": ("custom_llm_api_key", "custom_llm_base_url", "custom_llm_default_model"),
+    }
+    if req.providers:
+        for pname, p in req.providers.items():
+            if pname not in field_map:
+                continue
+            key_f, url_f, model_f = field_map[pname]
+            if key_f and p.api_key and "****" not in p.api_key:
+                setattr(s, key_f, p.api_key)
+            if url_f and p.base_url:
+                setattr(s, url_f, p.base_url)
+            if model_f and p.default_model:
+                setattr(s, model_f, p.default_model)
+
+    if req.agents:
+        for aname, a in req.agents.items():
+            p_attr = f"agent_{aname}_provider"
+            m_attr = f"agent_{aname}_model"
+            if hasattr(s, p_attr) and a.provider:
                 try:
-                    setattr(s, provider_attr, LLMProviderType(assignment.provider))
-                    updated_fields.append(provider_attr)
+                    setattr(s, p_attr, LLMProviderType(a.provider))
                 except ValueError:
                     pass
-            if hasattr(s, model_attr):
-                setattr(s, model_attr, assignment.model)
-                updated_fields.append(model_attr)
+            if hasattr(s, m_attr):
+                setattr(s, m_attr, a.model)
 
-    return {"status": "ok", "updated_fields": updated_fields}
+    return {"status": "ok", "updated_fields": updated_keys, "persisted": True}

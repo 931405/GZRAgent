@@ -98,6 +98,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("PD-MAWS subsystems initialized")
 
+    # Initialize database tables
+    from app.db import init_db
+    await init_db()
     # Register LLM providers (import triggers registration)
     from app.core.l1.providers import openai_provider, gemini_provider  # noqa: F401
     from app.core.l1.providers import ollama_provider, custom_provider   # noqa: F401
