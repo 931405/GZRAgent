@@ -367,13 +367,17 @@ def _mask_key(key: str) -> str:
 @router.get("/settings/llm", response_model=LLMSettingsResponse)
 async def get_llm_settings() -> LLMSettingsResponse:
     """Get current LLM provider settings. API keys are masked. DB takes priority over .env."""
-    # Merge: env defaults < database overrides
-    settings = _env_defaults()
+    settings: dict[str, str] = {}
     try:
-        db_settings = await _db_get_settings()
-        settings.update(db_settings)
+        # Merge: env defaults < database overrides
+        settings = _env_defaults()
+        try:
+            db_settings = await _db_get_settings()
+            settings.update(db_settings)
+        except Exception as e:
+            logger.warning("Failed to read LLM settings from DB (using env fallback): %s", e)
     except Exception as e:
-        logger.warning("Failed to read LLM settings from DB (using env fallback): %s", e)
+        logger.error("Critical error reading LLM settings, falling back to empty: %s", e)
 
     providers: Dict[str, LLMProviderSettings] = {}
     for pname in PROVIDER_NAMES:
