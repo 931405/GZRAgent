@@ -3,7 +3,7 @@ FastAPI REST API routes for session management and document operations.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api", tags=["sessions", "documents"])
 
 class CreateSessionRequest(BaseModel):
     topic: str = Field(description="Paper topic / title")
-    outline: list[dict[str, Any]] = Field(default_factory=list, description="Paper outline sections")
+    outline: List[Dict[str, Any]] = Field(default_factory=list, description="Paper outline sections")
     max_turns: int = Field(default=6, ge=1)
     budget_limit: int = Field(default=200_000, ge=0)
 
@@ -26,33 +26,33 @@ class SessionResponse(BaseModel):
     session_id: str
     state: str
     version: int
-    participants: list[str]
+    participants: List[str]
     turn_counter: int
     budget_utilization: float
 
 
 class CreateDocumentRequest(BaseModel):
     session_id: str
-    sections: list[dict[str, Any]] = Field(default_factory=list)
+    sections: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PatchDocumentRequest(BaseModel):
     author_agent: str
     base_version_hash: str
-    patches: list[dict[str, Any]]
+    patches: List[Dict[str, Any]]
     commit_message: str = ""
 
 
 class StartWorkflowRequest(BaseModel):
     session_id: str
     paper_topic: str
-    outline: list[dict[str, Any]]
+    outline: List[Dict[str, Any]]
 
 
 class WorkflowResponse(BaseModel):
     session_id: str
     status: str
-    result: dict[str, Any] = Field(default_factory=dict)
+    result: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +104,8 @@ async def get_session(session_id: str) -> SessionResponse:
     )
 
 
-@router.get("/sessions", response_model=list[str])
-async def list_sessions() -> list[str]:
+@router.get("/sessions", response_model=List[str])
+async def list_sessions() -> List[str]:
     """List all session IDs."""
     from app.main import get_registry
     registry = get_registry()

@@ -9,7 +9,7 @@ Ref: design.md Sections 4.0–4.3
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +42,7 @@ class SessionState(str, Enum):
 
 
 # Valid state transitions (from -> set of allowed targets)
-VALID_SESSION_TRANSITIONS: dict[SessionState, set[SessionState]] = {
+VALID_SESSION_TRANSITIONS: Dict[SessionState, Set[SessionState]] = {
     SessionState.INIT: {SessionState.RUNNING, SessionState.FAILED},
     SessionState.RUNNING: {
         SessionState.NEGOTIATING,
@@ -109,7 +109,7 @@ class SessionEntry(BaseModel):
     state: SessionState = Field(
         default=SessionState.INIT,
     )
-    participants: list[str] = Field(
+    participants: List[str] = Field(
         default_factory=list,
         description="List of agent IDs participating in this session",
     )
@@ -139,7 +139,7 @@ class SessionEntry(BaseModel):
     budget_snapshot: BudgetSnapshot = Field(
         default_factory=BudgetSnapshot,
     )
-    metadata: dict[str, Any] = Field(
+    metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary session-level metadata",
     )

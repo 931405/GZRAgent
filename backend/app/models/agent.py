@@ -10,7 +10,7 @@ Ref: design.md Section 7.2
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -66,16 +66,16 @@ class AgentConstraints(BaseModel):
     role: AgentRole = Field(
         description="The agent's role in the system",
     )
-    allowed_actions: list[str] = Field(
+    allowed_actions: List[str] = Field(
         default_factory=list,
         description="Actions this agent is permitted to perform",
     )
-    forbidden_actions: list[str] = Field(
+    forbidden_actions: List[str] = Field(
         default_factory=list,
         description="Actions this agent is NEVER permitted to perform. "
                     "Violation triggers immediate NACK + audit.",
     )
-    quality_gates: list[QualityGate] = Field(
+    quality_gates: List[QualityGate] = Field(
         default_factory=list,
         description="Quality gates checked during VERIFY phase",
     )
@@ -97,7 +97,7 @@ class AgentConstraints(BaseModel):
         default="",
         description="Specific model override (empty = use provider default)",
     )
-    metadata: dict[str, Any] = Field(
+    metadata: Dict[str, Any] = Field(
         default_factory=dict,
     )
 
@@ -108,7 +108,7 @@ class EvidenceOutput(BaseModel):
     Ref: design.md Section 8.2
     """
     claim: str = Field(description="The factual claim being evidenced")
-    evidence_ids: list[str] = Field(description="IDs of evidence documents")
+    evidence_ids: List[str] = Field(description="IDs of evidence documents")
     doi_or_ref: str = Field(default="", description="DOI or reference")
     confidence: float = Field(ge=0.0, le=1.0, description="Evidence confidence")
     retrieved_at: int = Field(description="Retrieval timestamp (ms)")
@@ -125,4 +125,4 @@ class ArbDecision(BaseModel):
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     escalate_to_human: bool = False
-    affected_sessions: list[str] = Field(default_factory=list)
+    affected_sessions: List[str] = Field(default_factory=list)

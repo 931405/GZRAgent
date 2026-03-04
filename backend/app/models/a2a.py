@@ -7,7 +7,7 @@ Covers: meta, session, route, payload, control, telemetry, security blocks.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 import uuid
@@ -200,7 +200,7 @@ class DocumentPointer(BaseModel):
     version_hash: str = Field(
         description="Baseline version hash for optimistic locking",
     )
-    patch_operations: list[dict[str, Any]] = Field(
+    patch_operations: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="JSON Patch operations (RFC 6902)",
     )
@@ -211,7 +211,7 @@ class Payload(BaseModel):
 
     Ref: design.md Section 3.1 → payload
     """
-    context_grounding: list[str] = Field(
+    context_grounding: List[str] = Field(
         default_factory=list,
         description="Reference IDs for evidence/grounding verification",
     )
@@ -219,11 +219,11 @@ class Payload(BaseModel):
         default=None,
         description="Pointer to document in Blackboard",
     )
-    constraints: dict[str, Any] = Field(
+    constraints: Dict[str, Any] = Field(
         default_factory=dict,
         description="Task-specific constraints",
     )
-    data: dict[str, Any] = Field(
+    data: Dict[str, Any] = Field(
         default_factory=dict,
         description="Generic payload data",
     )

@@ -12,7 +12,7 @@ Ref: design.md Section 4.4
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field
 import uuid
@@ -36,7 +36,7 @@ class DocumentState(str, Enum):
     FINAL = "FINAL"
 
 
-VALID_DOCUMENT_TRANSITIONS: dict[DocumentState, set[DocumentState]] = {
+VALID_DOCUMENT_TRANSITIONS: Dict[DocumentState, Set[DocumentState]] = {
     DocumentState.EMPTY: {DocumentState.DRAFTING},
     DocumentState.DRAFTING: {
         DocumentState.DRAFTING,        # patch accepted
@@ -99,7 +99,7 @@ class DraftVersion(BaseModel):
     author_agent: str = Field(
         description="Agent who created this version",
     )
-    patches: list[PatchOperation] = Field(
+    patches: List[PatchOperation] = Field(
         default_factory=list,
         description="Patches applied on top of parent_hash",
     )
@@ -118,7 +118,7 @@ class SectionContent(BaseModel):
     title: str = ""
     content: str = ""
     order: int = 0
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentBlackboard(BaseModel):
@@ -142,15 +142,15 @@ class DocumentBlackboard(BaseModel):
         default="",
         description="Hash of the latest accepted version",
     )
-    sections: list[SectionContent] = Field(
+    sections: List[SectionContent] = Field(
         default_factory=list,
         description="Current materialized sections",
     )
-    version_history: list[DraftVersion] = Field(
+    version_history: List[DraftVersion] = Field(
         default_factory=list,
         description="Ordered list of all committed versions",
     )
-    pending_patches: list[PatchOperation] = Field(
+    pending_patches: List[PatchOperation] = Field(
         default_factory=list,
         description="Patches waiting to be applied (e.g. during CONFLICT)",
     )
@@ -158,7 +158,7 @@ class DocumentBlackboard(BaseModel):
         default="",
         description="Agent ID holding the write lock (empty = unlocked)",
     )
-    metadata: dict[str, Any] = Field(
+    metadata: Dict[str, Any] = Field(
         default_factory=dict,
     )
 
