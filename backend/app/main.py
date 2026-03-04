@@ -98,9 +98,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("PD-MAWS subsystems initialized")
 
-    # Initialize database tables
-    from app.db import init_db
-    await init_db()
+    # Initialize database tables (non-fatal if DB not available)
+    try:
+        from app.db import init_db
+        await init_db()
+    except Exception as e:
+        logger.warning("Database init failed (LLM settings will use env fallback): %s", e)
     # Register LLM providers (import triggers registration)
     from app.core.l1.providers import openai_provider, gemini_provider  # noqa: F401
     from app.core.l1.providers import ollama_provider, custom_provider   # noqa: F401

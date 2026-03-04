@@ -416,8 +416,12 @@ async def update_llm_settings(req: LLMSettingsUpdateRequest) -> Dict[str, Any]:
                 updates[f"agent.{aname}.provider"] = a.provider
             updates[f"agent.{aname}.model"] = a.model
 
-    # Persist to database
-    updated_keys = await _db_put_settings(updates)
+    # Persist to database (non-fatal if DB unavailable)
+    updated_keys = list(updates.keys())
+    try:
+        updated_keys = await _db_put_settings(updates)
+    except Exception as e:
+        logger.warning("Failed to persist LLM settings to DB (in-memory only): %s", e)
 
     # Also update in-memory Settings singleton so changes take effect immediately
     from app.config import get_settings, LLMProviderType
