@@ -3,30 +3,26 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Install system deps for building Python packages
+# System deps for compiling C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
+    gcc libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml* requirements*.txt* ./
-# Install deps, prefer pyproject.toml, fallback to requirements.txt
+# Copy only the dependency manifest first (for layer caching)
+COPY pyproject.toml README.md ./
+
+# Install all runtime dependencies declared in pyproject.toml
 RUN pip install --upgrade pip && \
-    if [ -f pyproject.toml ]; then pip install --no-cache-dir .; \
-    elif [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; \
-    else pip install --no-cache-dir \
-        fastapi uvicorn[standard] \
-        redis[asyncio] asyncpg \
-        qdrant-client sqlalchemy \
-        pydantic pydantic-settings \
-        openai httpx langgraph langchain \
-        eval_type_backport; \
-    fi
+    pip install --no-cache-dir ".[dev]" || pip install --no-cache-dir .
 
 # ---------- Runtime stage ----------
 FROM python:3.11-slim
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -35,7 +31,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application source
 COPY app/ ./app/
 
-# .env will be mounted or passed via env_file in docker-compose
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
