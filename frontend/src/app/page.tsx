@@ -21,6 +21,7 @@ import { TiptapEditor } from "@/components/TiptapEditor";
 import { AgentStream } from "@/components/AgentStream";
 import { ConfigDialog } from "@/components/ConfigDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { LLMSettingsDialog } from "@/components/LLMSettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useTranslation, useI18nStore } from "@/store/i18nStore";
@@ -112,6 +113,7 @@ export default function StudioPage() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          <LLMSettingsDialog />
           <SettingsDialog />
           <Button variant="ghost" size="sm" onClick={toggleLang} className="h-8 px-2 text-xs font-medium">
             {lang === 'en' ? '中' : 'En'}

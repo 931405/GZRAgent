@@ -212,3 +212,130 @@ async def get_token_usage() -> dict:
     from app.main import get_circuit_breaker
     cb = get_circuit_breaker()
     return await cb.get_global_usage()
+
+
+# ---------------------------------------------------------------------------
+# LLM Settings endpoints
+# ---------------------------------------------------------------------------
+
+class LLMProviderSettings(BaseModel):
+    api_key: str = ""
+    base_url: str = ""
+    default_model: str = ""
+
+
+class AgentLLMAssignment(BaseModel):
+    provider: str = ""
+    model: str = ""
+
+
+class LLMSettingsResponse(BaseModel):
+    providers: Dict[str, LLMProviderSettings] = Field(default_factory=dict)
+    agents: Dict[str, AgentLLMAssignment] = Field(default_factory=dict)
+
+
+class LLMSettingsUpdateRequest(BaseModel):
+    providers: Optional[Dict[str, LLMProviderSettings]] = None
+    agents: Optional[Dict[str, AgentLLMAssignment]] = None
+
+
+@router.get("/settings/llm", response_model=LLMSettingsResponse)
+async def get_llm_settings() -> LLMSettingsResponse:
+    """Get current LLM provider settings (keys are masked)."""
+    from app.config import get_settings
+    s = get_settings()
+
+    def mask_key(key: str) -> str:
+        if not key or len(key) < 8:
+            return "****" if key else ""
+        return key[:4] + "****" + key[-4:]
+
+    providers = {
+        "openai": LLMProviderSettings(
+            api_key=mask_key(s.openai_api_key),
+            base_url=s.openai_base_url,
+            default_model=s.openai_default_model,
+        ),
+        "deepseek": LLMProviderSettings(
+            api_key=mask_key(s.deepseek_api_key),
+            base_url=s.deepseek_base_url,
+            default_model=s.deepseek_default_model,
+        ),
+        "gemini": LLMProviderSettings(
+            api_key=mask_key(s.gemini_api_key),
+            base_url="",
+            default_model=s.gemini_default_model,
+        ),
+        "ollama": LLMProviderSettings(
+            api_key="",
+            base_url=s.ollama_base_url,
+            default_model=s.ollama_default_model,
+        ),
+        "custom": LLMProviderSettings(
+            api_key=mask_key(s.custom_llm_api_key),
+            base_url=s.custom_llm_base_url,
+            default_model=s.custom_llm_default_model,
+        ),
+    }
+
+    agent_names = ["pi", "writer", "researcher", "red_team", "diagram", "format", "data_analyst"]
+    agents: Dict[str, AgentLLMAssignment] = {}
+    for name in agent_names:
+        provider_attr = f"agent_{name}_provider"
+        model_attr = f"agent_{name}_model"
+        agents[name] = AgentLLMAssignment(
+            provider=getattr(s, provider_attr, "openai").value
+            if hasattr(getattr(s, provider_attr, ""), "value")
+            else str(getattr(s, provider_attr, "openai")),
+            model=getattr(s, model_attr, ""),
+        )
+
+    return LLMSettingsResponse(providers=providers, agents=agents)
+
+
+@router.put("/settings/llm")
+async def update_llm_settings(req: LLMSettingsUpdateRequest) -> Dict[str, Any]:
+    """Update LLM provider settings at runtime."""
+    from app.config import get_settings, LLMProviderType
+    s = get_settings()
+
+    updated_fields: List[str] = []
+
+    if req.providers:
+        field_map = {
+            "openai": ("openai_api_key", "openai_base_url", "openai_default_model"),
+            "deepseek": ("deepseek_api_key", "deepseek_base_url", "deepseek_default_model"),
+            "gemini": ("gemini_api_key", "", "gemini_default_model"),
+            "ollama": ("", "ollama_base_url", "ollama_default_model"),
+            "custom": ("custom_llm_api_key", "custom_llm_base_url", "custom_llm_default_model"),
+        }
+        for provider_name, provider_settings in req.providers.items():
+            if provider_name not in field_map:
+                continue
+            key_field, url_field, model_field = field_map[provider_name]
+            # Only update api_key if it's not a masked value
+            if key_field and provider_settings.api_key and "****" not in provider_settings.api_key:
+                setattr(s, key_field, provider_settings.api_key)
+                updated_fields.append(key_field)
+            if url_field and provider_settings.base_url:
+                setattr(s, url_field, provider_settings.base_url)
+                updated_fields.append(url_field)
+            if model_field and provider_settings.default_model:
+                setattr(s, model_field, provider_settings.default_model)
+                updated_fields.append(model_field)
+
+    if req.agents:
+        for agent_name, assignment in req.agents.items():
+            provider_attr = f"agent_{agent_name}_provider"
+            model_attr = f"agent_{agent_name}_model"
+            if hasattr(s, provider_attr) and assignment.provider:
+                try:
+                    setattr(s, provider_attr, LLMProviderType(assignment.provider))
+                    updated_fields.append(provider_attr)
+                except ValueError:
+                    pass
+            if hasattr(s, model_attr):
+                setattr(s, model_attr, assignment.model)
+                updated_fields.append(model_attr)
+
+    return {"status": "ok", "updated_fields": updated_fields}
