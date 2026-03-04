@@ -17,8 +17,9 @@ export function useWebSocket() {
         const maxRetries = 5;
 
         const connect = () => {
-            // Note: Assuming backend runs on localhost:8000
-            const wsUrl = `ws://localhost:8000/api/ws/\${sessionId}`
+            const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+            const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || `ws://${HOST}:8000`;
+            const wsUrl = `${WS_BASE}/api/ws/${sessionId}`;
             const ws = new WebSocket(wsUrl)
             wsRef.current = ws
 

@@ -33,7 +33,10 @@ export function ConfigDialog() {
             // 1. Create the session
             const outlineSection = outline.split('\n').filter(s => s.trim()).map(s => ({ title: s.trim() }));
 
-            const sessionRes = await fetch('http://localhost:8000/api/sessions', {
+            const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+            const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://${HOST}:8000`;
+
+            const sessionRes = await fetch(`${API_BASE}/api/sessions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -51,7 +54,7 @@ export function ConfigDialog() {
             setSession(sessionData.session_id, sessionData.state);
 
             // 2. Start the workflow graph
-            const workflowRes = await fetch('http://localhost:8000/api/workflow/start', {
+            const workflowRes = await fetch(`${API_BASE}/api/workflow/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
