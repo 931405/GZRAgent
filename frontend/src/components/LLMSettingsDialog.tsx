@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Bot, Key, Save, RefreshCw } from "lucide-react"
+import { Bot, Key, Save, RefreshCw, Zap, BrainCircuit, Edit2, Search, ShieldAlert, BarChart3, FileText, LayoutGrid } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { useSettingsStore } from "@/store/settingsStore"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
 
 interface ProviderConfig {
     api_key: string
@@ -37,25 +38,37 @@ const PROVIDER_INFO: Record<string, { label: string; hasKey: boolean; hasUrl: bo
     openai: { label: "OpenAI", hasKey: true, hasUrl: true, placeholder: "sk-..." },
     deepseek: { label: "DeepSeek", hasKey: true, hasUrl: true, placeholder: "sk-..." },
     gemini: { label: "Google Gemini", hasKey: true, hasUrl: false, placeholder: "AIza..." },
-    ollama: { label: "Ollama (本地)", hasKey: false, hasUrl: true, placeholder: "" },
-    custom: { label: "自定义", hasKey: true, hasUrl: true, placeholder: "your-api-key" },
+    ollama: { label: "Ollama (Local)", hasKey: false, hasUrl: true, placeholder: "" },
+    custom: { label: "Custom", hasKey: true, hasUrl: true, placeholder: "your-api-key" },
+}
+
+const AGENT_ICONS: Record<string, React.ReactNode> = {
+    pi: <BrainCircuit size={14} />,
+    writer: <Edit2 size={14} />,
+    researcher: <Search size={14} />,
+    red_team: <ShieldAlert size={14} />,
+    diagram: <BarChart3 size={14} />,
+    format: <FileText size={14} />,
+    data_analyst: <LayoutGrid size={14} />,
 }
 
 const AGENT_LABELS: Record<string, string> = {
-    pi: "🧠 PI 协调者",
-    writer: "✍️ 学术写手",
-    researcher: "🔍 文献研究员",
-    red_team: "🛡️ 红队审稿人",
-    diagram: "📊 图表引擎",
-    format: "📄 格式化引擎",
-    data_analyst: "📈 数据分析师",
+    pi: "PI 协调者",
+    writer: "学术写手",
+    researcher: "文献研究员",
+    red_team: "红队审稿人",
+    diagram: "图表引擎",
+    format: "格式化引擎",
+    data_analyst: "数据分析师",
 }
 
 export function LLMSettingsDialog() {
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
+    const [testing, setTesting] = useState(false)
     const [settings, setSettings] = useState<LLMSettings | null>(null)
+    const [selectedProvider, setSelectedProvider] = useState("openai")
     const getApiBase = useSettingsStore(state => state.getApiBase)
 
     const fetchSettings = async () => {
@@ -99,6 +112,35 @@ export function LLMSettingsDialog() {
         })
     }
 
+    const handleTest = async () => {
+        if (!settings) return
+        setTesting(true)
+        try {
+            const provider = settings.providers[selectedProvider]
+            if (!provider) {
+                toast.error("未找到供应商配置")
+                return
+            }
+            // First save, then test health endpoint
+            const res = await fetch(`${getApiBase()}/api/health`)
+            if (res.ok) {
+                const info = PROVIDER_INFO[selectedProvider]
+                const hasKey = info?.hasKey && provider.api_key && !provider.api_key.includes('****')
+                if (hasKey || !info?.hasKey) {
+                    toast.success("后端连接正常，供应商 " + PROVIDER_INFO[selectedProvider]?.label + " 配置已就绪")
+                } else {
+                    toast.warning("后端连接正常，但 API Key 未配置或为脱敏值")
+                }
+            } else {
+                toast.error("后端连接异常")
+            }
+        } catch (e) {
+            toast.error("无法连接后端服务")
+        } finally {
+            setTesting(false)
+        }
+    }
+
     const handleSave = async () => {
         if (!settings) return
         setSaving(true)
@@ -110,7 +152,7 @@ export function LLMSettingsDialog() {
             })
             if (res.ok) {
                 const data = await res.json()
-                toast.success(`保存成功！更新了 ${data.updated_fields?.length || 0} 个字段`)
+                toast.success('保存成功！更新了 ' + (data.updated_fields?.length || 0) + ' 个字段')
                 setOpen(false)
             } else {
                 toast.error("保存失败")
@@ -123,6 +165,8 @@ export function LLMSettingsDialog() {
         }
     }
 
+    const currentProvider = settings?.providers[selectedProvider]
+
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -132,7 +176,10 @@ export function LLMSettingsDialog() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>🤖 大模型配置</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Bot size={18} />
+                        大模型配置
+                    </DialogTitle>
                     <DialogDescription>
                         配置 LLM API 密钥、模型，以及每个 Agent 使用的供应商
                     </DialogDescription>
@@ -146,56 +193,86 @@ export function LLMSettingsDialog() {
                 ) : settings ? (
                     <Tabs defaultValue="providers" className="w-full">
                         <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="providers">
-                                <Key size={14} className="mr-1" /> 供应商配置
+                            <TabsTrigger value="providers" className="gap-1.5">
+                                <Key size={14} /> 供应商配置
                             </TabsTrigger>
-                            <TabsTrigger value="agents">
-                                <Bot size={14} className="mr-1" /> Agent 分配
+                            <TabsTrigger value="agents" className="gap-1.5">
+                                <Bot size={14} /> Agent 分配
                             </TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="providers" className="space-y-4 mt-4">
-                            {Object.entries(PROVIDER_INFO).map(([name, info]) => {
-                                const provider = settings.providers[name]
-                                if (!provider) return null
-                                return (
-                                    <div key={name} className="rounded-lg border p-3 space-y-2">
-                                        <h4 className="text-sm font-semibold">{info.label}</h4>
-                                        {info.hasKey && (
-                                            <div className="grid gap-1">
-                                                <label className="text-xs text-muted-foreground">API Key</label>
-                                                <Input
-                                                    type="password"
-                                                    value={provider.api_key}
-                                                    onChange={(e) => updateProvider(name, "api_key", e.target.value)}
-                                                    placeholder={info.placeholder}
-                                                    className="h-8 text-sm font-mono"
-                                                />
-                                            </div>
-                                        )}
-                                        {info.hasUrl && (
-                                            <div className="grid gap-1">
-                                                <label className="text-xs text-muted-foreground">Base URL</label>
-                                                <Input
-                                                    value={provider.base_url}
-                                                    onChange={(e) => updateProvider(name, "base_url", e.target.value)}
-                                                    placeholder="https://api.example.com/v1"
-                                                    className="h-8 text-sm font-mono"
-                                                />
-                                            </div>
-                                        )}
-                                        <div className="grid gap-1">
-                                            <label className="text-xs text-muted-foreground">默认模型</label>
+                            {/* Provider dropdown selector */}
+                            <div className="grid gap-2">
+                                <label className="text-sm font-medium">选择供应商</label>
+                                <select
+                                    value={selectedProvider}
+                                    onChange={(e) => setSelectedProvider(e.target.value)}
+                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                    {Object.entries(PROVIDER_INFO).map(([name, info]) => (
+                                        <option key={name} value={name}>{info.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <Separator />
+
+                            {/* Selected provider config */}
+                            {currentProvider && (
+                                <div className="space-y-3">
+                                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                                        <Key size={14} className="text-muted-foreground" />
+                                        {PROVIDER_INFO[selectedProvider]?.label} 配置
+                                    </h4>
+
+                                    {PROVIDER_INFO[selectedProvider]?.hasKey && (
+                                        <div className="grid gap-1.5">
+                                            <label className="text-xs text-muted-foreground">API Key</label>
                                             <Input
-                                                value={provider.default_model}
-                                                onChange={(e) => updateProvider(name, "default_model", e.target.value)}
-                                                placeholder="model-name"
+                                                type="password"
+                                                value={currentProvider.api_key}
+                                                onChange={(e) => updateProvider(selectedProvider, "api_key", e.target.value)}
+                                                placeholder={PROVIDER_INFO[selectedProvider]?.placeholder}
                                                 className="h-8 text-sm font-mono"
                                             />
                                         </div>
+                                    )}
+
+                                    {PROVIDER_INFO[selectedProvider]?.hasUrl && (
+                                        <div className="grid gap-1.5">
+                                            <label className="text-xs text-muted-foreground">Base URL</label>
+                                            <Input
+                                                value={currentProvider.base_url}
+                                                onChange={(e) => updateProvider(selectedProvider, "base_url", e.target.value)}
+                                                placeholder="https://api.example.com/v1"
+                                                className="h-8 text-sm font-mono"
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div className="grid gap-1.5">
+                                        <label className="text-xs text-muted-foreground">默认模型</label>
+                                        <Input
+                                            value={currentProvider.default_model}
+                                            onChange={(e) => updateProvider(selectedProvider, "default_model", e.target.value)}
+                                            placeholder="model-name"
+                                            className="h-8 text-sm font-mono"
+                                        />
                                     </div>
-                                )
-                            })}
+
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="gap-2 w-full mt-2"
+                                        onClick={handleTest}
+                                        disabled={testing}
+                                    >
+                                        <Zap size={14} />
+                                        {testing ? "测试中..." : "测试连接"}
+                                    </Button>
+                                </div>
+                            )}
                         </TabsContent>
 
                         <TabsContent value="agents" className="space-y-3 mt-4">
@@ -204,7 +281,8 @@ export function LLMSettingsDialog() {
                             </p>
                             {Object.entries(settings.agents).map(([name, assignment]) => (
                                 <div key={name} className="rounded-lg border p-3 flex items-center gap-3">
-                                    <span className="text-sm font-medium min-w-[120px]">
+                                    <span className="text-sm font-medium min-w-[110px] flex items-center gap-1.5">
+                                        {AGENT_ICONS[name] || <Bot size={14} />}
                                         {AGENT_LABELS[name] || name}
                                     </span>
                                     <select
