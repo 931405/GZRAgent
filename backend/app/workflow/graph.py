@@ -120,6 +120,7 @@ class WritingState(TypedDict, total=False):
 
     review_findings: list[dict[str, Any]]
     review_passed: bool
+    revision_count: int
 
     final_document: str
     status: str
@@ -638,9 +639,12 @@ async def red_team_review(state: WritingState) -> WritingState:
     }
 
 
+MAX_REVISIONS = 2
+
 def should_revise(state: WritingState) -> str:
     """Conditional edge: revise or proceed to formatting."""
-    if not state.get("review_passed", False):
+    revision_count = state.get("revision_count", 0)
+    if not state.get("review_passed", False) and revision_count < MAX_REVISIONS:
         return "revise"
     return "format"
 
@@ -719,6 +723,7 @@ async def revise_draft(state: WritingState) -> WritingState:
         **state,
         "integrated_draft": revised,
         "draft_sections": {"revised": revised},
+        "revision_count": state.get("revision_count", 0) + 1,
         "status": "revising",
     }
 
@@ -828,7 +833,7 @@ def build_workflow() -> StateGraph:
         should_revise,
         {"revise": "revise", "format": "format"},
     )
-    graph.add_edge("revise", "write")
+    graph.add_edge("revise", "integrate")
     graph.add_edge("format", END)
 
     return graph
