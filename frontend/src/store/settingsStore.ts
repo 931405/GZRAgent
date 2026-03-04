@@ -31,7 +31,13 @@ export const useSettingsStore = create<SettingsState>()(
                 const stored = get().apiBaseUrl
                 if (stored) return stored
                 if (typeof window !== 'undefined') {
-                    return `http://${window.location.hostname}:8000`
+                    const { protocol, hostname, port } = window.location
+                    // If on port 80/443 or no port, we're behind Nginx — use same origin
+                    if (!port || port === '80' || port === '443') {
+                        return `${protocol}//${hostname}`
+                    }
+                    // Local dev: assume backend is on 8000
+                    return `http://${hostname}:8000`
                 }
                 return 'http://localhost:8000'
             },
@@ -40,7 +46,12 @@ export const useSettingsStore = create<SettingsState>()(
                 const stored = get().wsBaseUrl
                 if (stored) return stored
                 if (typeof window !== 'undefined') {
-                    return `ws://${window.location.hostname}:8000`
+                    const { protocol, hostname, port } = window.location
+                    const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
+                    if (!port || port === '80' || port === '443') {
+                        return `${wsProtocol}//${hostname}`
+                    }
+                    return `ws://${hostname}:8000`
                 }
                 return 'ws://localhost:8000'
             },

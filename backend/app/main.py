@@ -137,11 +137,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS
+    # CORS — allow all origins (browser requests go through nginx proxy, same origin in prod)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,  # cannot combine with allow_origins=["*"]
         allow_methods=["*"],
         allow_headers=["*"],
     )

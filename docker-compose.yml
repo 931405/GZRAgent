@@ -79,12 +79,22 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: pdmaws-frontend
-    ports:
-      - "3001:3000"
     environment:
       NODE_ENV: production
     depends_on:
       - backend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: pdmaws-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
     restart: unless-stopped
 
 volumes:
