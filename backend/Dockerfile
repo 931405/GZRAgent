@@ -29,6 +29,7 @@ RUN pip install --upgrade pip && \
         "httpx>=0.27.0" \
         "sqlalchemy[asyncio]>=2.0.30" \
         "asyncpg>=0.30.0" \
+        "sqlmodel>=0.0.16" \
         "redis[hiredis]>=5.0.0" \
         "qdrant-client>=1.11.0" \
         "python-jose[cryptography]>=3.3.0" \
