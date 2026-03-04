@@ -67,6 +67,7 @@ export function ConfigDialog() {
 
             if (!workflowRes.ok) throw new Error('Failed to start workflow');
 
+            toast.success("工作流已启动，智能体正在协作中...");
             setOpen(false);
         } catch (error) {
             console.error("Error starting session:", error);

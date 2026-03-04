@@ -178,7 +178,8 @@ async def patch_document(draft_id: str, req: PatchDocumentRequest) -> dict:
 
 @router.post("/workflow/start", response_model=WorkflowResponse)
 async def start_workflow(req: StartWorkflowRequest) -> WorkflowResponse:
-    """Start the writing workflow for a session."""
+    """Start the writing workflow for a session (async, fire-and-forget)."""
+    import asyncio
     from app.workflow.graph import compile_workflow
 
     workflow = compile_workflow()
@@ -188,12 +189,36 @@ async def start_workflow(req: StartWorkflowRequest) -> WorkflowResponse:
         "outline": req.outline,
     }
 
-    result = await workflow.ainvoke(initial_state)
+    async def _run_workflow():
+        """Background task that runs the full workflow."""
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            result = await workflow.ainvoke(initial_state)
+            logger.info("Workflow completed for session %s: status=%s",
+                        req.session_id, result.get("status"))
+        except Exception as e:
+            logger.error("Workflow failed for session %s: %s", req.session_id, e)
+            # Broadcast error to WebSocket
+            from app.api.websocket import manager
+            await manager.broadcast(req.session_id, {
+                "type": "telemetry",
+                "data": {
+                    "id": str(__import__("uuid").uuid4()),
+                    "timestamp": int(__import__("time").time() * 1000),
+                    "source": "System",
+                    "intent": "ERROR",
+                    "message": f"Workflow failed: {e}",
+                },
+            })
+
+    # Fire and forget — workflow runs in the background
+    asyncio.create_task(_run_workflow())
 
     return WorkflowResponse(
         session_id=req.session_id,
-        status=result.get("status", "unknown"),
-        result=result,
+        status="started",
+        result={"message": "Workflow started in background"},
     )
 
 

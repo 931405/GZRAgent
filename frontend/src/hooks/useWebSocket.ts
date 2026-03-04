@@ -59,6 +59,17 @@ export function useWebSocket() {
                     else if (data.type === 'telemetry') {
                         addLog(data.data as StreamEvent)
                     }
+                    else if (data.type === 'draft_update') {
+                        // Workflow node pushed new draft content
+                        useAppStore.getState().updateDocument(data.content || '')
+                    }
+                    else if (data.type === 'workflow_complete') {
+                        toast.success('工作流已完成！')
+                        useAppStore.getState().setSession(
+                            useAppStore.getState().sessionId || '',
+                            'COMPLETED' as any
+                        )
+                    }
                     else if (data.type === 'session_status') {
                         // Update global turn or other session fields if needed
                     }
