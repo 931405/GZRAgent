@@ -255,15 +255,14 @@ function AgentItem({ agent }: { agent: AgentInfo }) {
   const roleKey = `role.${agent.role.toLowerCase().replace(' ', '')}` as keyof typeof import('@/store/i18nStore').t;
 
   return (
-    <div className={`p-3 rounded-xl border flex flex-col gap-2.5 transition-all shadow-sm
-      \${isActive ? 'bg-card border-primary/30 ring-1 ring-primary/10 shadow-primary/5' : 'bg-transparent border-border/60 hover:bg-card/50'}`}>
+    <div className={`p-3 rounded-xl border flex flex-col gap-2.5 transition-all shadow-sm ${isActive ? 'bg-card border-primary/30 ring-1 ring-primary/10 shadow-primary/5' : 'bg-transparent border-border/60 hover:bg-card/50'}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={`p-1.5 rounded-md \${isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+          <div className={`p-1.5 rounded-md ${isActive ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
             {icon}
           </div>
           <div className="flex flex-col">
-            <span className={`font-semibold text-sm \${isActive ? 'text-foreground' : 'text-foreground/80'}`}>
+            <span className={`font-semibold text-sm ${isActive ? 'text-foreground' : 'text-foreground/80'}`}>
               {t(nameKey as any) || agent.name}
             </span>
             <span className="text-[10px] text-muted-foreground">{t(roleKey as any) || agent.role}</span>
@@ -273,7 +272,7 @@ function AgentItem({ agent }: { agent: AgentInfo }) {
       <div className="flex items-center justify-between bg-background/50 rounded p-1.5 border border-border/50">
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-medium text-muted-foreground">{t('agent.status')}</span>
-          <span className={`text-[10px] font-mono font-bold tracking-tight uppercase \${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
+          <span className={`text-[10px] font-mono font-bold tracking-tight uppercase ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
             {t(`status.${agent.status}` as any) || agent.status}
           </span>
         </div>

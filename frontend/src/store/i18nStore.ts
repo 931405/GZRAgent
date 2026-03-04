@@ -27,6 +27,12 @@ export const t: Translations = {
     'sidebar.fleet': { en: 'Agent Fleet', zh: '智能体舰队' },
     'agent.status': { en: 'STATUS:', zh: '状态:' },
 
+    // Agent names
+    'agent.name.pi': { en: 'PI Agent', zh: 'PI 协调者' },
+    'agent.name.writer': { en: 'Writer 01', zh: '学术写手' },
+    'agent.name.researcher': { en: 'Researcher', zh: '文献研究员' },
+    'agent.name.reviewer': { en: 'Red Team', zh: '红队审稿人' },
+
     // Agent status values
     'status.IDLE': { en: 'IDLE', zh: '空闲' },
     'status.PLAN': { en: 'PLAN', zh: '规划中' },
@@ -40,6 +46,7 @@ export const t: Translations = {
 
     // Roles
     'role.orchestrator': { en: 'Orchestrator', zh: '编排与规划' },
+    'role.academicwriter': { en: 'Academic Writer', zh: '学术主笔' },
     'role.writer': { en: 'Academic Writer', zh: '学术主笔' },
     'role.literature': { en: 'Literature', zh: '文献检索' },
     'role.reviewer': { en: 'Reviewer', zh: '红蓝对抗评审' },

@@ -35,7 +35,7 @@ export function useWebSocket() {
                     timestamp: Date.now(),
                     source: 'System',
                     intent: 'SYSTEM_INFO',
-                    message: `Connected to Session: \${sessionId}`
+                    message: 'Connected to Session: ' + sessionId
                 })
 
                 // Setup ping heartbeat
@@ -79,7 +79,7 @@ export function useWebSocket() {
                         timestamp: Date.now(),
                         source: 'System',
                         intent: 'WARNING',
-                        message: `WebSocket disconnected. Reconnecting in \${timeoutMs/1000}s... (\${reconnectCount}/\${maxRetries})`
+                        message: 'WebSocket disconnected. Reconnecting in ' + (timeoutMs / 1000) + 's... (' + reconnectCount + '/' + maxRetries + ')'
                     })
                     setTimeout(connect, timeoutMs)
                 } else {
