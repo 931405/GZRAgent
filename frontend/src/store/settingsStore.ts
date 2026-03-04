@@ -32,9 +32,9 @@ export const useSettingsStore = create<SettingsState>()(
                 if (stored) return stored
                 if (typeof window !== 'undefined') {
                     const { protocol, hostname, port } = window.location
-                    // If on port 80/443 or no port, we're behind Nginx — use same origin
-                    if (!port || port === '80' || port === '443') {
-                        return `${protocol}//${hostname}`
+                    // If on Nginx proxy port (3001) or standard ports (80/443), use same origin
+                    if (!port || port === '80' || port === '443' || port === '3001') {
+                        return `${protocol}//${hostname}:${port || ''}`.replace(/:$/, '')
                     }
                     // Local dev: assume backend is on 8000
                     return `http://${hostname}:8000`
@@ -48,8 +48,8 @@ export const useSettingsStore = create<SettingsState>()(
                 if (typeof window !== 'undefined') {
                     const { protocol, hostname, port } = window.location
                     const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
-                    if (!port || port === '80' || port === '443') {
-                        return `${wsProtocol}//${hostname}`
+                    if (!port || port === '80' || port === '443' || port === '3001') {
+                        return `${wsProtocol}//${hostname}:${port || ''}`.replace(/:$/, '')
                     }
                     return `ws://${hostname}:8000`
                 }
