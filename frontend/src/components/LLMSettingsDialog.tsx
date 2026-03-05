@@ -121,18 +121,27 @@ export function LLMSettingsDialog() {
                 toast.error("未找到供应商配置")
                 return
             }
-            // First save, then test health endpoint
-            const res = await fetch(`${getApiBase()}/api/health`)
+            // True connection test endpoint
+            const res = await fetch(`${getApiBase()}/api/settings/llm/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: selectedProvider,
+                    api_key: provider.api_key,
+                    base_url: provider.base_url,
+                    model: provider.default_model
+                })
+            });
+
             if (res.ok) {
-                const info = PROVIDER_INFO[selectedProvider]
-                const hasKey = info?.hasKey && provider.api_key && !provider.api_key.includes('****')
-                if (hasKey || !info?.hasKey) {
-                    toast.success("后端连接正常，供应商 " + PROVIDER_INFO[selectedProvider]?.label + " 配置已就绪")
+                const data = await res.json();
+                if (data.status === 'success') {
+                    toast.success("连接成功！响应: " + (data.model_reply || "OK"))
                 } else {
-                    toast.warning("后端连接正常，但 API Key 未配置或为脱敏值")
+                    toast.error("大模型连接失败: " + data.message)
                 }
             } else {
-                toast.error("后端连接异常")
+                toast.error("测试接口请求异常")
             }
         } catch (e) {
             toast.error("无法连接后端服务")

@@ -66,6 +66,13 @@ class StopWorkflowRequest(BaseModel):
     session_id: str
 
 
+class TestLLMRequest(BaseModel):
+    provider: str
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
 
 
 
@@ -446,6 +453,56 @@ async def get_llm_settings() -> LLMSettingsResponse:
         )
 
     return LLMSettingsResponse(providers=providers, agents=agents)
+
+
+@router.post("/settings/llm/test")
+async def test_llm_connection(req: TestLLMRequest) -> Dict[str, Any]:
+    """Test LLM API connection with the provided settings."""
+    from app.core.l1.llm_provider import LLMProviderFactory, ChatMessage
+
+    # Resolve API key if masked
+    api_key = req.api_key
+    if api_key and "****" in api_key:
+        env_sets = _env_defaults()
+        try:
+            db_sets = await _db_get_settings()
+        except Exception:
+            db_sets = {}
+        api_key = db_sets.get(f"provider.{req.provider}.api_key") or env_sets.get(f"provider.{req.provider}.api_key", "")
+
+    try:
+        # Some providers need default_model to be set even for tests
+        model = req.model
+        if not model:
+            if req.provider == "openai":
+                model = "gpt-3.5-turbo"
+            elif req.provider == "deepseek":
+                model = "deepseek-chat"
+            elif req.provider == "gemini":
+                model = "gemini-1.5-flash"
+                
+        provider = LLMProviderFactory.create(
+            req.provider,
+            api_key=api_key,
+            base_url=req.base_url,
+            default_model=model
+        )
+        
+        # Send a minimal ping
+        msg = ChatMessage(role="user", content="Hi, this is a connection test. Reply with exactly 'OK'.")
+        res = await provider.complete([msg], max_tokens=10)
+        
+        return {
+            "status": "success",
+            "message": "Connection successful",
+            "model_reply": res.content,
+        }
+    except Exception as e:
+        logger.error("LLM connection test failed for provider %s: %s", req.provider, e)
+        return {
+            "status": "error",
+            "message": str(e),
+        }
 
 
 @router.put("/settings/llm")
