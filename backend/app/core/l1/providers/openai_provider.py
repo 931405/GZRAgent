@@ -10,6 +10,7 @@ import logging
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
+import httpx
 
 from app.core.l1.llm_provider import (
     BaseLLMProvider,
@@ -30,7 +31,7 @@ class OpenAIProvider(BaseLLMProvider):
         self._client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.base_url or None,
-            timeout=self.timeout,
+            timeout=httpx.Timeout(self.timeout),
             max_retries=self.max_retries,
         )
 
