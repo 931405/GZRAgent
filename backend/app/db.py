@@ -54,6 +54,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create all tables (idempotent)."""
+    # Import all SQLModel models here so metadata is registered before create_all
+    import app.models.llm_settings  # noqa: F401
+
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
