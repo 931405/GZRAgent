@@ -10,6 +10,7 @@ import { Bold, Italic, Heading1, Heading2, Heading3, List, ListOrdered, Quote, C
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { marked } from 'marked'
 
 function ToolbarButton({ onClick, isActive, icon: Icon, label }: { onClick: () => void; isActive?: boolean; icon: React.ComponentType<{ size?: number }>; label: string }) {
     return (
@@ -42,8 +43,10 @@ export function TiptapEditor() {
             }),
         ],
         immediatelyRender: false,
-        content: content,
+        content: '', // Start empty, useEffect will populate it
         onUpdate: ({ editor }) => {
+            // We want to save the state, but we also want to avoid triggering endless formatting loops.
+            // When user types, we save HTML back to the store so next render keeps it formatted.
             updateDocument(editor.getHTML())
         },
         editorProps: {
@@ -54,9 +57,35 @@ export function TiptapEditor() {
     })
 
     useEffect(() => {
-        if (editor && content !== editor.getHTML()) {
-            editor.commands.setContent(content)
-        }
+        if (!editor || !content) return;
+
+        // Define an async helper to parse markdown
+        const loadContent = async () => {
+            // Check if it's already HTML (e.g. user typed something and we saved it)
+            // or if it's raw markdown from the backend. 
+            // Simple heuristic: if it contains typical markdown headers or lists but no <p> tags.
+            const isHtml = content.includes('<p>') || content.includes('<h1>') || content.includes('<h2>') || content.includes('<ul>');
+
+            let htmlToSet = content;
+            if (!isHtml) {
+                // If it looks like raw markdown, parse it to HTML
+                try {
+                    // marked.parse can be synchronous or asynchronous depending on configuration
+                    const parsed = await marked.parse(content);
+                    htmlToSet = parsed;
+                } catch (e) {
+                    console.error("Markdown parsing failed:", e);
+                }
+            }
+
+            // Only update if the parsed content is actually different from current editor content
+            // to avoid resetting selection cursor
+            if (editor.getHTML() !== htmlToSet) {
+                editor.commands.setContent(htmlToSet, { emitUpdate: false }) // preserves history/cursor better contextually
+            }
+        };
+
+        loadContent();
     }, [content, editor])
 
     return (
