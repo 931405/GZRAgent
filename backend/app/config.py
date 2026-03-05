@@ -28,7 +28,7 @@ class LLMProviderConfig(BaseSettings):
     api_key: str = ""
     base_url: str = ""
     default_model: str = ""
-    timeout: int = 120
+    timeout: int = 3600  # 1 hour timeout for extremely long academic writing requests
     max_retries: int = 3
 
 

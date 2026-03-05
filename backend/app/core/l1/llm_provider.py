@@ -70,7 +70,7 @@ class BaseLLMProvider(ABC):
         api_key: str = "",
         base_url: str = "",
         default_model: str = "",
-        timeout: int = 120,
+        timeout: int = 1200,  # 20 minutes for long academic writing tasks
         max_retries: int = 3,
     ) -> None:
         self.api_key = api_key
