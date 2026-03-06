@@ -61,6 +61,11 @@ def get_validator() -> A2AValidator:
     return _validator
 
 
+def get_deadlock_detector() -> DeadlockDetector:
+    assert _deadlock_detector is not None, "DeadlockDetector not initialized"
+    return _deadlock_detector
+
+
 # ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
@@ -152,6 +157,23 @@ def create_app() -> FastAPI:
 
     app.include_router(sessions_router)
     app.include_router(websocket_router)
+
+    # Public auth endpoint (no JWT required)
+    from app.api.auth import create_access_token
+    from pydantic import BaseModel as _BM
+
+    class _TokenRequest(_BM):
+        username: str = "admin"
+
+    class _TokenResponse(_BM):
+        access_token: str
+        token_type: str = "bearer"
+
+    @app.post("/api/auth/token", response_model=_TokenResponse, tags=["auth"])
+    async def login(req: _TokenRequest):
+        """Issue a JWT token. In production, validate credentials here."""
+        token = create_access_token(subject=req.username, extra={"role": "admin"})
+        return _TokenResponse(access_token=token)
 
     return app
 

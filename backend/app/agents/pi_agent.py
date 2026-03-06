@@ -33,6 +33,43 @@ from app.models.a2a import (
 from app.models.agent import AgentConstraints, AgentRole, ArbDecision, QualityGate
 
 
+_DECOMPOSE_PROMPT = """\
+你是一名资深学术研究 PI（首席研究员），负责协调多智能体学术写作系统。
+
+【你的职责】
+- 将论文大纲分解为可独立并行执行的子任务
+- 为每个子任务明确写作目标、所需证据类型和预估字数
+- 识别子任务之间的依赖关系
+
+【思考步骤】
+1. 分析论文主题和大纲结构
+2. 为每个章节确定核心论点和关键要点
+3. 评估各章节的并行可能性和依赖关系
+4. 输出结构化的子任务分解
+
+请用中文回复，输出清晰的分解方案。"""
+
+_ARBITRATION_PROMPT = """\
+你是多智能体系统中的冲突仲裁者，负责解决 Agent 之间的分歧。
+
+【仲裁原则】
+1. 基于学术规范和论文质量做出判断
+2. 给出明确的裁决和理由
+3. 评估自身裁决的置信度
+4. 置信度低于 0.7 时建议升级到人工决策
+
+【输出格式 — JSON】
+{
+  "decision_id": "唯一标识",
+  "dispute_summary": "争议摘要",
+  "resolution": "裁决结论",
+  "rationale": "裁决理由",
+  "confidence": 0.85,
+  "escalate_to_human": false
+}
+请用中文回复。"""
+
+
 class PIAgent(BaseAgent):
     """Principal Investigator — coordinator and arbiter of the system."""
 
@@ -50,7 +87,7 @@ class PIAgent(BaseAgent):
                 "RESUME_SESSION",
             ],
             forbidden_actions=[
-                "WRITE_DRAFT_CONTENT",  # PI does not write academic content
+                "WRITE_DRAFT_CONTENT",
                 "GENERATE_DIAGRAM",
                 "EXECUTE_DATA_CODE",
             ],
@@ -76,7 +113,6 @@ class PIAgent(BaseAgent):
         intent = message.route.intent
 
         if intent == AgentIntent.REQUEST_TASK:
-            # Decompose paper outline into chapter sub-tasks
             return await self._plan_decomposition(message)
         elif intent == AgentIntent.ARBITRATION_REQUEST:
             return await self._plan_arbitration(message)
@@ -86,18 +122,14 @@ class PIAgent(BaseAgent):
     async def _plan_decomposition(self, message: A2AMessage) -> dict[str, Any]:
         """Plan task decomposition for a paper outline."""
         response = await self.llm_complete([
-            ChatMessage(
-                role="system",
-                content=(
-                    "You are a principal investigator coordinating a multi-agent "
-                    "academic writing system. Analyze the given paper outline and "
-                    "decompose it into independent sub-tasks for parallel execution."
-                ),
-            ),
+            ChatMessage(role="system", content=_DECOMPOSE_PROMPT),
             ChatMessage(
                 role="user",
-                content=f"Paper task: {message.payload.data.get('task', '')}\n"
-                        f"Outline: {message.payload.data.get('outline', '')}",
+                content=(
+                    f"论文任务：{message.payload.data.get('task', '')}\n"
+                    f"大纲：{message.payload.data.get('outline', '')}\n\n"
+                    "请分解为子任务："
+                ),
             ),
         ])
         return {
@@ -130,12 +162,7 @@ class PIAgent(BaseAgent):
     async def _execute_arbitration(
         self, message: A2AMessage, plan: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute arbitration: Rule Engine -> LLM -> Human escalation.
-
-        Hard rules:
-        - 2 consecutive inconsistent LLM decisions -> human
-        - > 120s SLA -> human
-        """
+        """Execute arbitration: Rule Engine -> LLM -> Human escalation."""
         start_time = time.time()
         dispute = plan.get("dispute", "")
 
@@ -146,16 +173,8 @@ class PIAgent(BaseAgent):
 
         # Step 2: LLM arbitration
         response = await self.llm_complete([
-            ChatMessage(
-                role="system",
-                content=(
-                    "You are an arbitrator resolving a conflict between agents. "
-                    "Analyze the dispute and provide a structured resolution. "
-                    "Output JSON with: decision_id, dispute_summary, resolution, "
-                    "rationale, confidence (0-1), escalate_to_human (bool)."
-                ),
-            ),
-            ChatMessage(role="user", content=f"Dispute:\n{dispute}"),
+            ChatMessage(role="system", content=_ARBITRATION_PROMPT),
+            ChatMessage(role="user", content=f"争议内容：\n{dispute}"),
         ])
 
         # Check SLA
@@ -185,13 +204,12 @@ class PIAgent(BaseAgent):
 
     def _apply_rules(self, dispute: str) -> str | None:
         """Apply deterministic rule engine for clear-cut cases."""
-        # Example rules — extend as needed
-        if "formatting" in dispute.lower():
-            return "Apply journal style guide"
+        if "formatting" in dispute.lower() or "格式" in dispute:
+            return "Apply journal style guide / 按照期刊格式规范执行"
         return None
 
     async def verify(self, execution_result: dict[str, Any]) -> dict[str, Any]:
-        """Verify the execution result."""
+        """Verify the execution result, parsing real confidence from LLM output."""
         result_type = execution_result.get("type", "")
         if result_type == "decomposition":
             return {
@@ -199,11 +217,27 @@ class PIAgent(BaseAgent):
                 "arbitration_confidence": 1.0,
             }
         elif result_type == "arbitration":
+            confidence = self._extract_confidence(execution_result.get("decision", ""))
             return {
                 "decomposition_complete": True,
-                "arbitration_confidence": 0.8,
+                "arbitration_confidence": confidence,
             }
         return {"decomposition_complete": True, "arbitration_confidence": 1.0}
+
+    @staticmethod
+    def _extract_confidence(decision_text: str) -> float:
+        """Extract confidence score from arbitration LLM output."""
+        import re, json
+        try:
+            data = json.loads(decision_text)
+            if "confidence" in data:
+                return float(data["confidence"])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+        match = re.search(r'"confidence"\s*:\s*([\d.]+)', decision_text)
+        if match:
+            return float(match.group(1))
+        return 0.5
 
     async def emit(
         self,
@@ -218,16 +252,13 @@ class PIAgent(BaseAgent):
         if result_type == "arbitration":
             intent = AgentIntent.ARBITRATION_DECISION
 
+        session_ctx = self._get_session_context()
         return A2AMessage(
             meta=MessageMeta(
                 correlation_id="",
                 timestamp_ms=now_ms,
             ),
-            session=SessionContext(
-                session_id="",
-                session_version=0,
-                current_turn=0,
-            ),
+            session=session_ctx,
             route=RouteInfo(
                 source_agent=self.agent_id,
                 target_agent="",

@@ -72,6 +72,9 @@ class BaseAgent(ABC):
         # LLM Provider (lazy init)
         self._llm_provider: Optional[BaseLLMProvider] = None
 
+        # Current message context (set in receive_task for emit() access)
+        self._current_message: Optional[A2AMessage] = None
+
         # Telemetry
         self._total_prompt_tokens = 0
         self._total_completion_tokens = 0
@@ -171,7 +174,11 @@ class BaseAgent(ABC):
             return bool(results.get(gate.name, False))
         elif gate.gate_type == "schema_check":
             return gate.name in results and results[gate.name] is not None
-        return True
+        logger.warning(
+            "Agent %s: unknown gate_type '%s' for gate '%s' — treating as FAIL",
+            self.agent_id, gate.gate_type, gate.name,
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Lifecycle (state machine driven)
@@ -189,6 +196,7 @@ class BaseAgent(ABC):
         Returns: Output A2A message, or None if interrupted/error.
         """
         self._task_start_time = time.time()
+        self._current_message = message
         context = {"input_message": message}
 
         try:
@@ -241,8 +249,11 @@ class BaseAgent(ABC):
         except Exception as e:
             try:
                 self._state_machine.transition(AgentState.ERROR)
-            except Exception:
-                pass  # May already be in terminal state
+            except Exception as transition_err:
+                logger.debug(
+                    "Agent %s: state transition to ERROR failed (already terminal): %s",
+                    self.agent_id, transition_err,
+                )
             logger.error(
                 "Agent %s error in state %s: %s",
                 self.agent_id, self.state.value, e,
@@ -321,6 +332,13 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------------
+
+    def _get_session_context(self) -> "SessionContext":
+        """Get session context from the current message for use in emit()."""
+        from app.models.a2a import SessionContext
+        if self._current_message:
+            return self._current_message.session
+        return SessionContext(session_id="", session_version=0, current_turn=0)
 
     def get_telemetry(self) -> dict[str, Any]:
         """Get current telemetry data."""

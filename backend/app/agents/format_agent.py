@@ -17,6 +17,20 @@ from app.models.a2a import (
 from app.models.agent import AgentConstraints, AgentRole, QualityGate
 
 
+_FORMAT_PROMPT = """\
+你是学术论文格式化专家，负责按照目标期刊格式进行最终排版。
+
+【格式化任务】
+1. 统一引用格式（正文 [编号] + 文末参考文献列表）
+2. 规范章节编号和标题层级
+3. 确保全文术语一致
+4. 检查图表编号和引用
+5. 生成符合规范的参考文献格式
+
+【输出要求】
+输出格式化后的完整文档，保持学术内容不变。用中文输出。"""
+
+
 class FormatAgent(BaseAgent):
     """Format Controller — applies journal-specific formatting rules."""
 
@@ -33,13 +47,16 @@ class FormatAgent(BaseAgent):
         super().__init__(agent_id, constraints)
 
     async def plan(self, message: A2AMessage) -> dict[str, Any]:
-        return {"target_format": message.payload.data.get("format", "IEEE"), "content": message.payload.data.get("content", "")}
+        return {
+            "target_format": message.payload.data.get("format", "IEEE"),
+            "content": message.payload.data.get("content", ""),
+        }
 
     async def execute(self, message: A2AMessage, plan: dict[str, Any]) -> dict[str, Any]:
         response = await self.llm_complete([
             ChatMessage(
                 role="system",
-                content=f"Apply {plan['target_format']} formatting to the document. Convert citations to the journal's required style.",
+                content=f"请按照 {plan['target_format']} 格式排版以下论文。\n\n{_FORMAT_PROMPT}",
             ),
             ChatMessage(role="user", content=plan["content"]),
         ])
@@ -50,9 +67,10 @@ class FormatAgent(BaseAgent):
 
     async def emit(self, execution_result: dict[str, Any], verification_result: dict[str, Any]) -> A2AMessage:
         now_ms = int(time.time() * 1000)
+        session_ctx = self._get_session_context()
         return A2AMessage(
             meta=MessageMeta(correlation_id="", timestamp_ms=now_ms),
-            session=SessionContext(session_id="", session_version=0, current_turn=0),
+            session=session_ctx,
             route=RouteInfo(source_agent=self.agent_id, target_agent="", intent=AgentIntent.FORMAT_COMPLETED),
             payload=Payload(data=execution_result),
             telemetry=Telemetry(prompt_tokens_used=self._total_prompt_tokens, completion_tokens_used=self._total_completion_tokens),

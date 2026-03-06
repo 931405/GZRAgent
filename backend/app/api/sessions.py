@@ -10,9 +10,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.auth import get_current_user
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["sessions", "documents"])
+router = APIRouter(prefix="/api", tags=["sessions", "documents"], dependencies=[Depends(get_current_user)])
 
 # Global dictionary to track active workflow tasks for cancellation
 active_workflows: Dict[str, asyncio.Task] = {}
@@ -570,3 +572,56 @@ async def update_llm_settings(req: LLMSettingsUpdateRequest) -> Dict[str, Any]:
                 setattr(s, m_attr, a.model)
 
     return {"status": "ok", "updated_fields": updated_keys, "persisted": True}
+
+
+# ---------------------------------------------------------------------------
+# Document Export
+# ---------------------------------------------------------------------------
+
+class ExportRequest(BaseModel):
+    content: str = Field(description="Markdown content to export")
+    format: str = Field(default="latex", description="Export format: latex, pdf, docx")
+    title: str = Field(default="", description="Paper title")
+    author: str = Field(default="", description="Paper author(s)")
+
+
+@router.post("/documents/export")
+async def export_document(req: ExportRequest):
+    """Export a paper document to LaTeX, PDF, or DOCX."""
+    from app.core.l1.document_export import export_to_latex, export_to_pdf, export_to_docx
+
+    if req.format == "latex":
+        result = await export_to_latex(req.content, title=req.title, author=req.author)
+    elif req.format == "pdf":
+        result = await export_to_pdf(req.content, title=req.title, author=req.author)
+    elif req.format == "docx":
+        result = await export_to_docx(req.content, title=req.title)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {req.format}")
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error)
+
+    return result.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Code Sandbox Execution
+# ---------------------------------------------------------------------------
+
+class CodeExecuteRequest(BaseModel):
+    code: str = Field(description="Python code to execute")
+    timeout: int = Field(default=30, ge=1, le=120, description="Max execution time in seconds")
+
+
+@router.post("/tools/execute-code")
+async def execute_code(req: CodeExecuteRequest):
+    """Execute Python code in a sandboxed environment."""
+    from app.core.l1.code_sandbox import execute_python
+
+    result = await execute_python(req.code, timeout=req.timeout)
+
+    if result.security_violation:
+        raise HTTPException(status_code=403, detail=f"Security violation: {result.security_violation}")
+
+    return result.model_dump()

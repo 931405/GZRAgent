@@ -22,6 +22,23 @@ from app.models.a2a import (
 from app.models.agent import AgentConstraints, AgentRole, QualityGate
 
 
+_DIAGRAM_PROMPT = """\
+你是学术图表设计专家，根据文本内容生成结构化图表。
+
+【设计原则】
+1. 图中所有实体必须对应文本中的实际概念
+2. 使用清晰的标签和合适的配色（WCAG AA 对比度）
+3. 图表结构清晰，信息完整且不冗余
+
+【思考步骤】
+1. 分析文本，找出适合可视化的概念关系
+2. 确定最合适的图表类型
+3. 设计图表结构
+4. 生成代码
+
+只输出图表代码，不要添加解释文字。"""
+
+
 class DiagramAgent(BaseAgent):
     """Visual Diagram Agent — text logic -> chart code."""
 
@@ -62,12 +79,7 @@ class DiagramAgent(BaseAgent):
         response = await self.llm_complete([
             ChatMessage(
                 role="system",
-                content=(
-                    f"Generate a {plan['chart_type']} chart from the given text. "
-                    "All entities in the chart must correspond to concepts in the text. "
-                    "Use appropriate colors with sufficient contrast (WCAG AA). "
-                    "Output ONLY the chart code, no explanation."
-                ),
+                content=f"请使用 {plan['chart_type']} 语法生成图表。\n\n{_DIAGRAM_PROMPT}",
             ),
             ChatMessage(role="user", content=plan["source_text"]),
         ])
@@ -75,16 +87,34 @@ class DiagramAgent(BaseAgent):
 
     async def verify(self, execution_result: dict[str, Any]) -> dict[str, Any]:
         code = execution_result.get("chart_code", "")
+        source_text = ""
+        if self._current_message:
+            source_text = self._current_message.payload.data.get("text", "")
+
+        syntax_ok = len(code) > 10
+        semantic_ok = self._check_semantic_consistency(code, source_text) if source_text else True
         return {
-            "syntax_valid": len(code) > 10,  # Basic check — extend with parser
-            "semantic_consistent": True,  # Would check entities against source
+            "syntax_valid": syntax_ok,
+            "semantic_consistent": semantic_ok,
         }
+
+    @staticmethod
+    def _check_semantic_consistency(chart_code: str, source_text: str) -> bool:
+        """Check that key entities in chart actually appear in the source text."""
+        import re
+        labels = re.findall(r'[\[("\|]([^"\]\|)\n]{3,})[\]"\|)]', chart_code)
+        if not labels:
+            return True
+        source_lower = source_text.lower()
+        matched = sum(1 for label in labels if label.strip().lower() in source_lower)
+        return (matched / len(labels)) >= 0.4 if labels else True
 
     async def emit(self, execution_result: dict[str, Any], verification_result: dict[str, Any]) -> A2AMessage:
         now_ms = int(time.time() * 1000)
+        session_ctx = self._get_session_context()
         return A2AMessage(
             meta=MessageMeta(correlation_id="", timestamp_ms=now_ms),
-            session=SessionContext(session_id="", session_version=0, current_turn=0),
+            session=session_ctx,
             route=RouteInfo(source_agent=self.agent_id, target_agent="", intent=AgentIntent.DIAGRAM_RESPONSE),
             payload=Payload(data=execution_result),
             telemetry=Telemetry(prompt_tokens_used=self._total_prompt_tokens, completion_tokens_used=self._total_completion_tokens),

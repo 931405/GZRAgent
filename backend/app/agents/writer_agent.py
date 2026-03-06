@@ -8,6 +8,7 @@ Ref: design.md Section 8 (implicit), Section 4.4
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -18,6 +19,36 @@ from app.models.a2a import (
     RouteInfo, SessionContext, Telemetry, DocumentPointer,
 )
 from app.models.agent import AgentConstraints, AgentRole, QualityGate
+
+
+_PLAN_PROMPT = """\
+你是一名资深学术论文写手。请为指定章节制定写作计划。
+
+【思考步骤】
+1. 分析章节主题在全文中的定位
+2. 确定需要哪些类型的证据和引用
+3. 规划论证结构：背景 → 问题 → 论证 → 小结
+4. 列出需要的图表或数据
+
+请输出：论证大纲、所需证据清单、预估字数。用中文回复。"""
+
+_EXECUTE_PROMPT = """\
+你是一名资深学术论文写手，具备深厚的学术写作功底。
+
+【写作规范】
+- 每段开头给出段落主旨句
+- 引用格式：使用 [作者, 年份] 格式
+- 禁止使用"我认为""本文认为"等主观表述
+- 专业术语首次出现时须简要说明
+- 段落间有清晰的逻辑过渡
+
+【写作后自检】
+□ 每个核心主张都有引用支撑
+□ 逻辑连贯、过渡自然
+□ 无主观表述
+如有问题请直接修正。
+
+用中文撰写，输出严谨的学术文章。"""
 
 
 class WriterAgent(BaseAgent):
@@ -58,18 +89,14 @@ class WriterAgent(BaseAgent):
     async def plan(self, message: A2AMessage) -> dict[str, Any]:
         """Plan the writing strategy for the assigned section."""
         response = await self.llm_complete([
-            ChatMessage(
-                role="system",
-                content=(
-                    "You are an academic writer. Plan how to write the assigned "
-                    "section. Identify what evidence and references are needed, "
-                    "outline the argument structure, and list any diagrams required."
-                ),
-            ),
+            ChatMessage(role="system", content=_PLAN_PROMPT),
             ChatMessage(
                 role="user",
-                content=f"Assignment: {message.payload.data.get('assignment', '')}\n"
-                        f"Context: {message.payload.data.get('context', '')}",
+                content=(
+                    f"章节任务：{message.payload.data.get('assignment', '')}\n"
+                    f"上下文：{message.payload.data.get('context', '')}\n\n"
+                    "请制定写作计划："
+                ),
             ),
         ])
         return {"outline": response.content, "needs_evidence": True}
@@ -78,30 +105,26 @@ class WriterAgent(BaseAgent):
         self, message: A2AMessage, plan: dict[str, Any]
     ) -> dict[str, Any]:
         """Write the section content using LLM."""
+        evidence = message.payload.data.get("evidence", "暂无可用文献")
         response = await self.llm_complete([
-            ChatMessage(
-                role="system",
-                content=(
-                    "You are an academic writer. Write the section based on the "
-                    "plan and available evidence. Include proper citations using "
-                    "[ref_id] format. Output well-structured academic prose."
-                ),
-            ),
+            ChatMessage(role="system", content=_EXECUTE_PROMPT),
             ChatMessage(
                 role="user",
-                content=f"Plan:\n{plan.get('outline', '')}\n\n"
-                        f"Evidence: {message.payload.data.get('evidence', 'none available')}",
+                content=(
+                    f"写作计划：\n{plan.get('outline', '')}\n\n"
+                    f"可用文献：{evidence}\n\n"
+                    "请撰写该章节内容："
+                ),
             ),
         ])
         return {
             "content": response.content,
-            "word_count": len(response.content.split()),
+            "word_count": len(response.content),
             "citations": self._extract_citations(response.content),
         }
 
     def _extract_citations(self, text: str) -> list[str]:
         """Extract citation references from text."""
-        import re
         return re.findall(r'\[([^\]]+)\]', text)
 
     async def verify(self, execution_result: dict[str, Any]) -> dict[str, Any]:
@@ -118,9 +141,10 @@ class WriterAgent(BaseAgent):
     ) -> A2AMessage:
         """Emit a PATCH request to the Blackboard."""
         now_ms = int(time.time() * 1000)
+        session_ctx = self._get_session_context()
         return A2AMessage(
             meta=MessageMeta(correlation_id="", timestamp_ms=now_ms),
-            session=SessionContext(session_id="", session_version=0, current_turn=0),
+            session=session_ctx,
             route=RouteInfo(
                 source_agent=self.agent_id,
                 target_agent="blackboard",

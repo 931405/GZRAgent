@@ -64,9 +64,10 @@ class HumanProxyAgent(BaseAgent):
         elif action == "HALT":
             intent = AgentIntent.HALT
 
+        session_ctx = self._get_session_context()
         return A2AMessage(
             meta=MessageMeta(correlation_id="", timestamp_ms=now_ms),
-            session=SessionContext(session_id="", session_version=0, current_turn=0),
+            session=session_ctx,
             route=RouteInfo(source_agent=self.agent_id, target_agent="PI_Agent_01", intent=intent),
             payload=Payload(data=execution_result),
             telemetry=Telemetry(),

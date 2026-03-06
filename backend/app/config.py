@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     global_token_hard_limit: int = 2_000_000
     agent_token_soft_limit: int = 200_000
 
+    # ---- Evidence Search ----
+    semantic_scholar_api_key: str = ""  # Optional, works without it (lower rate limit)
+    evidence_search_enabled: bool = True  # Enable external API search (S2 + arXiv + CrossRef)
+    evidence_qdrant_enabled: bool = True  # Enable Qdrant local vector search
+    embedding_model: str = "text-embedding-3-small"  # Model for Qdrant query embeddings
+
     # ---- Observability ----
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
 

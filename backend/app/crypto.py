@@ -38,13 +38,21 @@ def encrypt(plaintext: str) -> str:
     return f.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 
+class DecryptionError(Exception):
+    """Raised when decryption fails due to invalid key or corrupted data."""
+
+
 def decrypt(ciphertext: str) -> str:
-    """Decrypt a ciphertext string. Returns plaintext."""
+    """Decrypt a ciphertext string. Returns plaintext.
+
+    Raises DecryptionError on failure so callers can distinguish
+    'decryption failed' from 'original value was empty'.
+    """
     if not ciphertext:
         return ""
     f = _get_fernet()
     try:
         return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except Exception as e:
-        logger.warning("Failed to decrypt value: %s", e)
-        return ""
+        logger.error("Decryption failed (key mismatch or corrupted data): %s", e)
+        raise DecryptionError(f"Failed to decrypt value: {e}") from e

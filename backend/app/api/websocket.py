@@ -49,7 +49,8 @@ class ConnectionManager:
         for ws in self._connections[session_id]:
             try:
                 await ws.send_text(payload)
-            except Exception:
+            except Exception as e:
+                logger.debug("WebSocket send failed, marking dead: %s", e)
                 dead.append(ws)
 
         # Clean up dead connections
@@ -141,6 +142,42 @@ async def _handle_ws_command(
             "type": "session_halted",
             "data": entry.model_dump(),
         })
+
+    elif cmd_type == "force_update":
+        content = command.get("content", "")
+        if content:
+            await manager.broadcast(session_id, {
+                "type": "draft_update",
+                "content": content,
+                "source": "human_proxy",
+            })
+            logger.info("Human force_update on session %s (%d chars)", session_id, len(content))
+        else:
+            await manager.send_to(websocket, {
+                "type": "error",
+                "message": "force_update requires 'content' field",
+            })
+
+    elif cmd_type == "check_deadlock":
+        try:
+            from app.main import get_deadlock_detector
+            detector = get_deadlock_detector()
+            event = await detector.check_session(session_id)
+            if event:
+                await manager.send_to(websocket, {
+                    "type": "deadlock_detected",
+                    "data": event.to_dict(),
+                })
+            else:
+                await manager.send_to(websocket, {
+                    "type": "deadlock_check",
+                    "result": "no_deadlock",
+                })
+        except Exception as e:
+            await manager.send_to(websocket, {
+                "type": "error",
+                "message": f"Deadlock check failed: {e}",
+            })
 
     else:
         await manager.send_to(websocket, {
