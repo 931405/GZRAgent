@@ -278,14 +278,40 @@ async def decompose_task(state: WritingState) -> WritingState:
                 "assigned_writer": "writer",
             })
 
-    # Ensure coverage of all outline sections
-    if len(sub_tasks) < len(outline):
-        for i in range(len(sub_tasks), len(outline)):
-            title = outline[i].get("title", f"Section {i}")
+    # CRITICAL: Ensure EVERY outline section has a corresponding sub_task.
+    # If LLM produced fewer tasks than outline sections, fill from outline.
+    # If LLM produced tasks with wrong IDs, rebuild the mapping.
+    existing_titles = {t["section_title"].lower().strip() for t in sub_tasks}
+
+    for i, section in enumerate(outline):
+        title = section.get("title", f"Section {i+1}")
+        if title.lower().strip() not in existing_titles:
+            # Find if there's a sub_task that roughly matches
+            matched = False
+            for st in sub_tasks:
+                if title.lower() in st["section_title"].lower() or st["section_title"].lower() in title.lower():
+                    matched = True
+                    break
+            if not matched:
+                sub_tasks.append({
+                    "task_id": f"sec_{i}",
+                    "section_title": title,
+                    "writing_instructions": f"请撰写关于「{title}」的学术内容。",
+                    "evidence_needed": "",
+                    "key_points": [],
+                    "estimated_words": 800,
+                    "assigned_writer": "writer",
+                })
+
+    # If we still have no sub_tasks at all (total LLM failure), generate from outline
+    if not sub_tasks and outline:
+        logger.warning("Complete decompose failure, generating tasks directly from outline")
+        for i, section in enumerate(outline):
+            title = section.get("title", f"Section {i+1}")
             sub_tasks.append({
                 "task_id": f"sec_{i}",
                 "section_title": title,
-                "writing_instructions": f"请撰写关于「{title}」的学术内容。",
+                "writing_instructions": f"请撰写关于「{title}」的学术内容。主题：{topic}",
                 "evidence_needed": "",
                 "key_points": [],
                 "estimated_words": 800,
@@ -705,14 +731,22 @@ async def generate_diagrams(state: WritingState) -> WritingState:
 # ---------------------------------------------------------------------------
 
 async def integrate_draft(state: WritingState) -> WritingState:
-    """PI Agent integrates all sections into a coherent draft."""
+    """PI Agent integrates all sections into a coherent draft.
+
+    Handles two scenarios:
+      - First pass: combine draft_sections from writer output
+      - Revision pass: polish the already-integrated revised draft
+    """
     session_id = state.get("session_id", "")
     topic = state.get("paper_topic", "")
-    logger.info("Workflow: integrate_draft")
+    revision_count = state.get("revision_count", 0)
+    logger.info("Workflow: integrate_draft (revision_count=%d)", revision_count)
+
+    is_revision_round = revision_count > 0 and state.get("integrated_draft", "").strip()
 
     await _broadcast_event(
         session_id, "PI_Agent", "TASK_ASSIGNED",
-        "PI Agent 正在整合所有章节为连贯的论文初稿...",
+        f"PI Agent 正在{'润色修订后的' if is_revision_round else '整合所有章节为连贯的'}论文初稿...",
         agent_id="pi", agent_status="EXECUTE",
     )
 
@@ -721,15 +755,33 @@ async def integrate_draft(state: WritingState) -> WritingState:
 
     paper_ctx_block = build_paper_context_block(state)
 
-    sections = state.get("draft_sections", {})
-    sub_tasks = state.get("sub_tasks", [])
+    if is_revision_round:
+        # After revision: integrated_draft already has the full revised paper.
+        # Just ask PI to polish coherence, don't rebuild from draft_sections.
+        raw_combined = state["integrated_draft"]
+        user_instruction = (
+            f"论文主题：{topic}\n\n"
+            f"以下是经过第 {revision_count} 轮修订后的论文全文，"
+            f"请检查并确保各章节逻辑连贯、术语统一、过渡自然：\n"
+            f"{smart_truncate(raw_combined, 12000)}"
+        )
+    else:
+        # First pass: combine individual sections from writers
+        sections = state.get("draft_sections", {})
+        sub_tasks = state.get("sub_tasks", [])
 
-    raw_combined = ""
-    for task in sub_tasks:
-        sid = task["task_id"]
-        title = task["section_title"]
-        content = sections.get(sid, "[无内容]")
-        raw_combined += f"\n## {title}\n\n{content}\n"
+        raw_combined = ""
+        for task in sub_tasks:
+            sid = task["task_id"]
+            title = task["section_title"]
+            content = sections.get(sid, "[无内容]")
+            raw_combined += f"\n## {title}\n\n{content}\n"
+
+        user_instruction = (
+            f"论文主题：{topic}\n\n"
+            f"以下是各章节的草稿内容，请整合为一篇连贯的论文：\n"
+            f"{smart_truncate(raw_combined, 12000)}"
+        )
 
     messages = [
         ChatMessage(
@@ -738,11 +790,7 @@ async def integrate_draft(state: WritingState) -> WritingState:
         ),
         ChatMessage(
             role="user",
-            content=(
-                f"论文主题：{topic}\n\n"
-                f"以下是各章节的草稿内容，请整合为一篇连贯的论文：\n"
-                f"{smart_truncate(raw_combined, 12000)}"
-            ),
+            content=user_instruction,
         ),
     ]
 
@@ -763,13 +811,35 @@ async def integrate_draft(state: WritingState) -> WritingState:
             },
         )
     except Exception as e:
-        logger.error("Integration failed: %s", e)
-        integrated = raw_combined
-        await _broadcast_event(
-            session_id, "PI_Agent", "ERROR",
-            f"整合失败，使用原始拼接: {str(e)[:100]}",
-            agent_id="pi", agent_status="DONE",
-        )
+        logger.error("Integration failed (attempt 1): %s", e)
+        # Retry once with smaller context before falling back
+        try:
+            logger.info("Integration retry with reduced context...")
+            retry_messages = [
+                ChatMessage(
+                    role="system",
+                    content="你是论文 PI，请将以下论文章节整合为连贯的完整论文。保持核心内容不变，统一术语，添加过渡段落。用中文输出。",
+                ),
+                ChatMessage(
+                    role="user",
+                    content=f"论文主题：{topic}\n\n{smart_truncate(raw_combined, 6000)}",
+                ),
+            ]
+            response = await llm.complete(retry_messages, temperature=0.4, max_tokens=6000)
+            integrated = response.content
+            await _broadcast_event(
+                session_id, "PI_Agent", "DELIVER_CONTENT",
+                f"论文初稿整合完成（重试成功，{len(integrated)} 字）",
+                agent_id="pi", agent_status="DONE",
+            )
+        except Exception as retry_e:
+            logger.error("Integration retry also failed: %s", retry_e)
+            integrated = raw_combined
+            await _broadcast_event(
+                session_id, "PI_Agent", "ERROR",
+                f"整合失败（含重试），使用原始拼接: {str(retry_e)[:100]}",
+                agent_id="pi", agent_status="DONE",
+            )
 
     await _broadcast_draft(session_id, integrated)
 
@@ -986,10 +1056,11 @@ async def revise_draft(state: WritingState) -> WritingState:
             agent_id="writer", agent_status="DONE",
         )
 
+    # Keep original draft_sections intact — integrate_draft will use
+    # integrated_draft directly on revision rounds instead of rebuilding.
     return {
         **state,
         "integrated_draft": revised,
-        "draft_sections": {"revised": revised},
         "revision_count": revision_count + 1,
         "status": "revising",
     }
